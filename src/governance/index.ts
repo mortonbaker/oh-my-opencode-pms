@@ -36,6 +36,7 @@ export * from './workflow/smoke-gate.js';
 export * from './workflow/dispatch.js';
 export * from './workflow/run-phase.js';
 export * from './workflow/pre-run.js';
+export * from './workflow/architect-output-validator.js';
 
 // Run dir + budget
 export * from './run-dir/run-dir.js';
