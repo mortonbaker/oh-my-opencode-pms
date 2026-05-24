@@ -2,6 +2,10 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { createAgents, getAgentConfigs, getDisabledAgents } from './agents';
 import { buildOrchestratorPrompt } from './agents/project-manager';
 import {
+  preToolUseGovernance,
+  postToolUseGovernance,
+} from './governance/integration/plugin-hooks.js';
+import {
   type AgentOverrideConfig,
   deepMerge,
   loadPluginConfig,
@@ -908,6 +912,19 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
     // Best-effort rescue only for stale apply_patch input before native
     // execution
     'tool.execute.before': async (input, output) => {
+      // PMS governance pre-tool gate: token + wall-clock budget check
+      // + audit-chain append. No-ops gracefully when PMS_RUN_ID is unset
+      // (i.e. ad-hoc opencode sessions outside the run-phase orchestrator).
+      // Throws BudgetDenialError to block the tool call when budget exhausted.
+      await preToolUseGovernance(
+        {
+          tool: input.tool,
+          sessionID: (input as { sessionID?: string }).sessionID,
+          callID: (input as { callID?: string }).callID,
+        },
+        { args: (output as { args?: unknown }).args },
+      );
+
       await applyPatchHook['tool.execute.before'](
         input as {
           tool: string;
@@ -1205,6 +1222,24 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
           callId: input.callID,
         });
       }
+
+      // PMS governance post-tool gate: scoped typecheck/lint verifier
+      // after Edit/Write tools + audit-chain append on every tool. No-ops
+      // gracefully when PMS_RUN_ID is unset. Errors propagate (not
+      // wrapped in runPostToolHook) so verifier failures surface to the
+      // calling subagent as a tool-call error — that's the "block on
+      // regression" mechanism Tier 4 requires.
+      await postToolUseGovernance(
+        {
+          tool: input.tool,
+          sessionID: (input as { sessionID?: string }).sessionID,
+          callID: (input as { callID?: string }).callID,
+        },
+        {
+          args: (output as { args?: unknown }).args,
+          output: (output as { output?: string }).output,
+        },
+      );
     },
   };
 };
