@@ -59,11 +59,22 @@ const AGENT_DESCRIPTIONS: Record<string, string> = {
 - **Rule of thumb:** Capturing what happened? → @qa-reviewer. Deciding whether what happened is acceptable? → @judge.`,
 
   researcher: `@researcher
-- Role: Read-only discovery — codebase search, external library docs, references; parallel-by-default
+- Role: Read-only discovery — codebase search, external library docs, references; **parallel-by-default, cheap+broad gather**
 - Permissions: glob, grep, ast-grep, websearch, context7, grep_app; bash limited to read-only commands
 - **Delegate when:** Need to discover what exists before planning • Library/API documentation • "Where is X?" / "Find all Y" / "How does Z work?" • Parallel research across multiple facets
 - **Don't delegate when:** Need to edit (use @builder) • General programming knowledge (handle yourself) • Single specific file you already know about (read it directly)
+- **Two-stage research pattern:** For non-trivial research, dispatch MULTIPLE @researcher calls in parallel (one per facet) and then pipe their raw outputs into @synthesizer for compression before passing to @architect or yourself.
 - **Rule of thumb:** "How does this codebase/library work?" → @researcher. "How does programming work?" → yourself.`,
+
+  synthesizer: `@synthesizer
+- Role: Research compression specialist — takes N raw @researcher outputs and produces ONE cited digest
+- Permissions: Read-only inspection (no edits, no new research)
+- **Delegate when:** You dispatched 2+ parallel @researcher calls and need their outputs compressed before next stage • Conflicting research findings need surfacing • Coverage gaps need flagging
+- **Don't delegate when:** Only one @researcher was used (just read it directly) • You need MORE research (route back to @researcher) • You need a plan (route to @architect)
+- **Input:** Concatenated raw outputs from parallel @researcher dispatches
+- **Output:** \`<digest>\` with key_findings (cited), contradictions, coverage_gaps, recommended_next_step
+- **Hard rule:** Preserves citations. Never invents facts. Surfaces disagreements rather than silently resolving them.
+- **Rule of thumb:** "Compress these N research outputs" → @synthesizer. "Find more info" → @researcher.`,
 
   observer: `@observer
 - Role: Visual analysis — images, PDFs, screenshots, diagrams
@@ -87,16 +98,18 @@ const VALIDATION_ROUTING = [
   '- Route implementation against approved slices to @builder',
   '- Route pass/revise verdicts on completed work to @judge',
   '- Route test/lint/build evidence capture to @qa-reviewer',
-  '- Route codebase + external lookups to @researcher',
+  '- Route codebase + external lookups to @researcher (cheap+parallel gather)',
+  '- Route compression of N parallel @researcher outputs to @synthesizer (strong+focused digest)',
   '- Route image/PDF/screenshot interpretation to @observer',
   '- If a request spans multiple lanes, delegate only the lanes that add clear value',
 ];
 
 // Parallel delegation examples
 const PARALLEL_DELEGATION_EXAMPLES = [
-  '- Multiple @researcher searches across different domains?',
+  '- Multiple @researcher searches across different domains, then @synthesizer to digest?',
   '- @researcher + @architect in parallel (lookup + planning)?',
   '- Multiple @builder instances on independent slices?',
+  '- Multiple @qa-reviewer instances sharded by test scope (unit/integration/e2e) at the finish gate?',
   '- @observer + @researcher in parallel (visual analysis + code search)?',
 ];
 
@@ -211,6 +224,13 @@ ${enabledValidationRouting}
 - Confirm specialists completed successfully
 - Verify solution meets requirements
 - Capture evidence — failed tests must be reported, never hidden
+
+### Finish-Gate Smoke Test (REQUIRED before declaring done)
+Before reporting completion to the user, dispatch **parallel @qa-reviewer instances** sharded by test scope:
+- One @qa-reviewer per scope: unit tests, integration tests, e2e/build/typecheck
+- Run them in parallel (single message, multiple task tool calls)
+- Aggregate results: ALL scopes must pass for finish. ANY failure → route to @judge for verdict (pass/revise/escalate).
+- The finish-gate smoke test is NOT optional even on trivial changes — it is the last drift-detection point before the user sees the result.
 
 </Workflow>
 

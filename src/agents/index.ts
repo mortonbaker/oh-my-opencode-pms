@@ -27,6 +27,8 @@ import {
 } from './project-manager';
 import { createQaReviewerAgent } from './qa-reviewer';
 import { createResearcherAgent } from './researcher';
+import { createSynthesizerAgent } from './synthesizer';
+import { createTriageAgent } from './triage';
 
 export type { AgentDefinition } from './project-manager';
 
@@ -209,6 +211,8 @@ const SUBAGENT_FACTORIES: Record<SubagentName, AgentFactory> = {
   judge: createJudgeAgent,
   'qa-reviewer': createQaReviewerAgent,
   researcher: createResearcherAgent,
+  synthesizer: createSynthesizerAgent,
+  triage: createTriageAgent,
   observer: createObserverAgent,
   council: createCouncilAgent,
   councillor: createCouncillorAgent,

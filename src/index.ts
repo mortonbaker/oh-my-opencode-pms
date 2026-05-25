@@ -35,6 +35,12 @@ import {
   ForegroundFallbackManager,
 } from './hooks';
 import { processImageAttachments } from './hooks/image-hook';
+import {
+  createCriteriaValidatorHook,
+  createDispatchJudgeHook,
+  createHarnessDeployTool,
+  createParallelDetectorHook,
+} from './harness';
 import { createInterviewManager } from './interview';
 import { createBuiltinMcps } from './mcp';
 import {
@@ -74,7 +80,7 @@ async function appLog(
 ): Promise<void> {
   try {
     await ctx.client.app.log({
-      body: { service: 'oh-my-opencode-slim', level, message },
+      body: { service: 'oh-my-opencode-pms', level, message },
     });
   } catch {
     // client.app.log may deadlock or be unavailable; stderr is the
@@ -144,6 +150,10 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let todoContinuationHook: ReturnType<typeof createTodoContinuationHook>;
   let sessionGoalHook: ReturnType<typeof createSessionGoalHook>;
   let taskSessionManagerHook: ReturnType<typeof createTaskSessionManagerHook>;
+  let parallelDetectorHook: ReturnType<typeof createParallelDetectorHook>;
+  let criteriaValidatorHook: ReturnType<typeof createCriteriaValidatorHook>;
+  let dispatchJudgeHook: ReturnType<typeof createDispatchJudgeHook>;
+  let harnessDeployTool: ReturnType<typeof createHarnessDeployTool>;
   let interviewManager: ReturnType<typeof createInterviewManager>;
   let presetManager: ReturnType<typeof createPresetManager>;
   let divoomManager: ReturnType<typeof createDivoomManager>;
@@ -327,6 +337,14 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
     presetManager = createPresetManager(ctx, config);
     divoomManager = createDivoomManager(config.divoom);
 
+    // Harness hooks (formerly separate plugins in ~/.opencode/plugins/).
+    // Each factory returns the single hook handler it owns; they're chained
+    // into the corresponding PMS hook below.
+    parallelDetectorHook = createParallelDetectorHook(ctx);
+    criteriaValidatorHook = createCriteriaValidatorHook(ctx);
+    dispatchJudgeHook = createDispatchJudgeHook(ctx);
+    harnessDeployTool = createHarnessDeployTool();
+
     subtaskState = createSubtaskState();
     subtaskCommandManager = createSubtaskCommandManager(ctx, subtaskState);
 
@@ -403,6 +421,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       ...councilTools,
       webfetch,
       ...todoContinuationHook.tool,
+      ...harnessDeployTool,
       ast_grep_search,
       ast_grep_replace,
       subtask: createSubtaskTool(ctx, subtaskState, depthTracker),
@@ -944,6 +963,13 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         output as { args?: unknown },
       );
 
+      // Harness: criteria-validator — hard-block task dispatches without
+      // falsifiable success criteria. Throws DISPATCH_BLOCKED on rejection.
+      await criteriaValidatorHook['tool.execute.before'](
+        input as { tool: string },
+        output as { args?: Record<string, unknown> },
+      );
+
       if (input.tool.toLowerCase() === 'task') {
         divoomManager.onTaskStart({
           parentSessionId: input.sessionID,
@@ -1102,6 +1128,17 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
           }
           part.text = rewriteDisplayNameMentions(part.text);
         }
+
+        // Harness: parallel-detector — analyze user prompt, append a
+        // <system-reminder> text part if N-similar-units pattern detected.
+        // Best-effort; never blocks the message.
+        try {
+          await parallelDetectorHook.analyzeUserMessage(message.parts);
+        } catch (err) {
+          log('[plugin] parallel-detector failed open', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Strip image parts from orchestrator messages when @observer is
@@ -1212,6 +1249,16 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
             sessionID?: string;
             callID?: string;
           },
+          output as { output: unknown },
+        ),
+      );
+
+      // Harness: dispatch-judge — re-runs verification commands from the
+      // subagent dispatch and appends a system-reminder if it lied about
+      // running them. Fails open via runPostToolHook.
+      await runPostToolHook('dispatch-judge', () =>
+        dispatchJudgeHook['tool.execute.after'](
+          input as { tool: string; args?: Record<string, unknown> },
           output as { output: unknown },
         ),
       );

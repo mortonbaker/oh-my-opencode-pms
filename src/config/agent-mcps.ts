@@ -26,6 +26,8 @@ export const DEFAULT_AGENT_MCPS: Record<AgentName, string[]> = {
   judge: [],
   'qa-reviewer': [],
   researcher: ['websearch', 'context7', 'grep_app'],
+  synthesizer: [],
+  triage: [],
   observer: [],
   council: [],
   councillor: [],
