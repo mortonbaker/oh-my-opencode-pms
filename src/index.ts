@@ -37,6 +37,7 @@ import {
   ForegroundFallbackManager,
 } from './hooks';
 import { createRememberCommand } from './commands/remember';
+import { createTtsSpeakCommand } from './commands/tts-speak';
 import { processImageAttachments } from './hooks/image-hook';
 import {
   createCriteriaValidatorHook,
@@ -144,6 +145,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let precompactFlushHook: ReturnType<typeof createPrecompactFlushHook>;
   let researchGateHook: ReturnType<typeof createResearchGateHook>;
   let rememberCommand: ReturnType<typeof createRememberCommand>;
+  let ttsSpeakCommand: ReturnType<typeof createTtsSpeakCommand>;
   let filterAvailableSkillsHook: ReturnType<
     typeof createFilterAvailableSkillsHook
   >;
@@ -298,6 +300,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
     rememberCommand = createRememberCommand({
       getAgentName: (sessionID) => sessionAgentMap.get(sessionID),
     });
+    ttsSpeakCommand = createTtsSpeakCommand();
 
     // Initialize available skills filter hook
     filterAvailableSkillsHook = createFilterAvailableSkillsHook(ctx, config);
@@ -777,6 +780,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       presetManager.registerCommand(opencodeConfig);
       subtaskCommandManager.registerCommand(opencodeConfig);
       rememberCommand.registerCommand(opencodeConfig);
+      ttsSpeakCommand.registerCommand(opencodeConfig);
     },
 
     event: async (input) => {
@@ -1079,6 +1083,15 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       );
 
       await sessionGoalHook.handleCommandExecuteBefore(
+        input as {
+          command: string;
+          sessionID: string;
+          arguments: string;
+        },
+        output as { parts: Array<{ type: string; text?: string }> },
+      );
+
+      await ttsSpeakCommand.handleCommandExecuteBefore(
         input as {
           command: string;
           sessionID: string;
