@@ -34,7 +34,16 @@
     // cold-start memory injection. Writes per-project to .memsearch/
     // memory/YYYY-MM-DD.md. Cross-machine canonical store is
     // ~/.local/share/agent-memory/events.jsonl (managed by pms hooks).
-    "opencode-memsearch"
+    "opencode-memsearch",
+
+    // opencode-tts — auto-speaks summarized assistant responses via
+    // Edge TTS (Microsoft neural, free, no API key). Operator is
+    // mobile-first, often listening via TTS. Plugin auto-installs
+    // edge-tts into ~/.config/opencode/tts-venv on first use.
+    // Config: ~/.config/opencode/plugins/opencode-tts.jsonc
+    // Slash commands: /tts-on /tts-off /tts-mode-summary
+    //                 /tts-mode-full /tts-speak /tts-repeat
+    "opencode-tts"
   ],
   "agent": {
     // Disable opencode's built-in `explore` and `general` so the slim pantheon's

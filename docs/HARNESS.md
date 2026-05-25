@@ -309,4 +309,4 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 | `/remember` | `src/commands/remember.ts` | (see source) |
 <!-- /AUTOGEN:commands -->
 
-<!-- AUTOGEN:last-refresh 2026-05-25T21:26:33.483835Z -->
+<!-- AUTOGEN:last-refresh 2026-05-25T21:34:32.385690Z -->
