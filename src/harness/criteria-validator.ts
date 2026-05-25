@@ -382,11 +382,17 @@ function tier0Validate(prompt: string, subagentType: string): Tier0Result {
     }
   }
 
-  // 3. Check ## Expected Output Shape section
-  if (!sections.expectedOutputShape) {
-    blockedFor.push("missing ## Expected Output Shape section");
-  } else {
-    const nonBlankLines = sections.expectedOutputShape.split("\n").filter((l) => l.trim().length > 0);
+  // 3. ## Expected Output Shape — OPTIONAL in PMS. Was a slim convention
+  //    for research-style dispatches (explorer/librarian) that returned
+  //    structured JSON to the caller. The PMS pantheon uses different
+  //    patterns: builder/qa-reviewer return "files changed" + verbatim
+  //    command output (no JSON shape), researcher/synthesizer are
+  //    VALIDATION_EXEMPT_AGENTS and never reach tier 0. So we only
+  //    complain about a malformed section if one is present.
+  if (sections.expectedOutputShape) {
+    const nonBlankLines = sections.expectedOutputShape
+      .split("\n")
+      .filter((l) => l.trim().length > 0);
     if (nonBlankLines.length === 0) {
       blockedFor.push("## Expected Output Shape section has no non-blank lines");
     }
@@ -548,13 +554,40 @@ export async function validateDispatch(
     };
   }
 
-  // Tier 1 — haiku scorer (requires providerClient)
+  // Tier 1 — haiku scorer (requires providerClient). FAIL-OPEN: if the
+  // classifier crashes (bad model slug, auth failure, network, etc.) we
+  // pass the dispatch through rather than block legitimate work on
+  // harness infrastructure problems. Tier 0 is the actual gate; tier 1
+  // is the "catch subtle vagueness" backstop and must never be load-bearing.
   if (!providerClient) {
     return { ok: true };
   }
 
-  const tier1 = await tier1Validate(prompt, providerClient);
+  let tier1: Awaited<ReturnType<typeof tier1Validate>>;
+  try {
+    tier1 = await tier1Validate(prompt, providerClient);
+  } catch (err) {
+    console.warn(
+      "[criteria-validator] tier-1 classifier threw; failing open:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return { ok: true };
+  }
+  // Tier 1 returned a structured "blocked" decision — only honor it if
+  // the classifier itself succeeded. Classifier infrastructure errors
+  // (network, model not found, etc.) come back as blockedFor entries
+  // prefixed with "criteria-validator/tier1-classify-error:"; ignore those.
   if (!tier1.ok) {
+    const isInfraError = tier1.blockedFor.some((b) =>
+      b.startsWith("criteria-validator/tier1-classify-error:"),
+    );
+    if (isInfraError) {
+      console.warn(
+        "[criteria-validator] tier-1 infra error; failing open:",
+        tier1.blockedFor[0],
+      );
+      return { ok: true };
+    }
     return {
       ok: false,
       tier: "tier1",

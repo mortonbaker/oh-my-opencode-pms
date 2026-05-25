@@ -63,8 +63,30 @@ You read the input, match it to the schema the caller provided, and return JSON 
 Schema violations are a hard failure — return {"error": "<one-sentence reason>"} and nothing else.
 Do not include the word "json" or markdown formatting. Just the JSON object.`;
 
-export const DEFAULT_MODEL = "opencode/claude-haiku-4-5";
+/**
+ * Default classifier model. anthropic/claude-haiku-4-5 routes through Claude
+ * Max OAuth (no per-call billing on the user's subscription) and is one of
+ * the slugs in MODEL_PREFERENCES.md. Caller can override via opts.model.
+ */
+export const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
 export const DEFAULT_MAX_TOKENS = 256;
+
+/**
+ * Parse a "provider/model" slug into the {providerID, modelID} shape
+ * opencode's session.prompt expects. Splits on the FIRST '/' so model IDs
+ * containing slashes (e.g. xiaomi-token-plan-sgp/mimo-v2.5-pro) round-trip
+ * correctly.
+ */
+function parseModelSlug(
+  slug: string,
+): { providerID: string; modelID: string } | null {
+  const slashIndex = slug.indexOf("/");
+  if (slashIndex <= 0 || slashIndex >= slug.length - 1) return null;
+  return {
+    providerID: slug.slice(0, slashIndex),
+    modelID: slug.slice(slashIndex + 1),
+  };
+}
 
 // ── Core classifier ──────────────────────────────────────────────────────
 
@@ -216,6 +238,14 @@ export function providerClientFromOpencode(
 
   return {
     generate: async ({ model, system, user, maxTokens: _maxTokens, temperature: _temperature }) => {
+      // Parse model slug into the {providerID, modelID} shape opencode expects.
+      const modelRef = parseModelSlug(model);
+      if (!modelRef) {
+        throw new Error(
+          `cheap-classifier: invalid model slug "${model}" (expected provider/model)`,
+        );
+      }
+
       // 1. Create an ephemeral session for the classifier call.
       const session = (await (client as unknown as {
         session: {
@@ -247,7 +277,7 @@ export function providerClientFromOpencode(
           path: { id: sessionId },
           query: { directory },
           body: {
-            model,
+            model: modelRef,
             system,
             tools: {}, // disable all tools — classifier is text-in/JSON-out
             parts: [{ type: 'text', text: user }],
