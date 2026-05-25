@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# pre-commit — deterministic doc-update + research-gate compliance check.
+#
+# Activated by: `git config core.hooksPath .githooks` (run once per clone).
+# Pattern: russellmoss/agent-guard (Feb 2026) — regenerate inventory docs +
+# never block the commit. If regen modifies HARNESS.md, the new version is
+# staged automatically so the operator's commit includes the updated docs.
+
+set -u
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -z "$REPO_ROOT" ] && exit 0
+
+# ---- 1. Refresh AUTOGEN blocks in docs/HARNESS.md ----
+if [ -x "$REPO_ROOT/scripts/refresh-harness-doc.sh" ]; then
+  "$REPO_ROOT/scripts/refresh-harness-doc.sh" 2>/dev/null || true
+  # If the script modified the doc, stage it so it lands in this commit
+  if ! git -C "$REPO_ROOT" diff --quiet -- docs/HARNESS.md 2>/dev/null; then
+    git -C "$REPO_ROOT" add docs/HARNESS.md
+    echo "pre-commit: docs/HARNESS.md autogen blocks updated + staged"
+  fi
+fi
+
+# ---- 2. Soft check: warn if source changed without HARNESS.md update ----
+# (Doesn't block — just nudges. Aligned with the "advisory" stance.)
+changed=$(git diff --cached --name-only 2>/dev/null \
+  | grep -E '^(src/hooks/|src/agents/|src/commands/|src/cli/custom-skills\.ts|src/harness/)' \
+  | head -5)
+if [ -n "$changed" ]; then
+  doc_changed=$(git diff --cached --name-only 2>/dev/null | grep -E '^docs/HARNESS\.md$')
+  if [ -z "$doc_changed" ]; then
+    echo "pre-commit: NOTE — src/ changes without HARNESS.md update (autogen ran; verify it captured what you needed)"
+  fi
+fi
+
+# Never block the commit
+exit 0

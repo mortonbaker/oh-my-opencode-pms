@@ -29,12 +29,14 @@ import {
   createJsonErrorRecoveryHook,
   createPhaseReminderHook,
   createPostFileToolNudgeHook,
+  createPrecompactFlushHook,
   createResearchGateHook,
   createSessionGoalHook,
   createTaskSessionManagerHook,
   createTodoContinuationHook,
   ForegroundFallbackManager,
 } from './hooks';
+import { createRememberCommand } from './commands/remember';
 import { processImageAttachments } from './hooks/image-hook';
 import {
   createCriteriaValidatorHook,
@@ -139,7 +141,9 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let multiplexerSessionManager: MultiplexerSessionManager;
   let autoUpdateChecker: ReturnType<typeof createAutoUpdateCheckerHook>;
   let phaseReminderHook: ReturnType<typeof createPhaseReminderHook>;
+  let precompactFlushHook: ReturnType<typeof createPrecompactFlushHook>;
   let researchGateHook: ReturnType<typeof createResearchGateHook>;
+  let rememberCommand: ReturnType<typeof createRememberCommand>;
   let filterAvailableSkillsHook: ReturnType<
     typeof createFilterAvailableSkillsHook
   >;
@@ -289,7 +293,11 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
 
     // Initialize phase reminder hook for workflow compliance
     phaseReminderHook = createPhaseReminderHook();
+    precompactFlushHook = createPrecompactFlushHook();
     researchGateHook = createResearchGateHook();
+    rememberCommand = createRememberCommand({
+      getAgentName: (sessionID) => sessionAgentMap.get(sessionID),
+    });
 
     // Initialize available skills filter hook
     filterAvailableSkillsHook = createFilterAvailableSkillsHook(ctx, config);
@@ -768,6 +776,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       sessionGoalHook.registerCommand(opencodeConfig);
       presetManager.registerCommand(opencodeConfig);
       subtaskCommandManager.registerCommand(opencodeConfig);
+      rememberCommand.registerCommand(opencodeConfig);
     },
 
     event: async (input) => {
@@ -1077,6 +1086,15 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         },
         output as { parts: Array<{ type: string; text?: string }> },
       );
+
+      await rememberCommand.handleCommandExecuteBefore(
+        input as {
+          command: string;
+          sessionID: string;
+          arguments: string;
+        },
+        output as { parts: Array<{ type: string; text?: string }> },
+      );
     },
 
     'chat.headers': chatHeadersHook['chat.headers'],
@@ -1157,6 +1175,18 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       // them back into one element so OpenCode emits a single system
       // message.
       collapseSystemInPlace(output.system);
+    },
+
+    // Pre-compaction flush (Anthropic Cookbook pattern): inject instruction
+    // to extract durable memories before opencode summarizes the session.
+    'experimental.session.compacting': async (
+      input: { sessionID: string },
+      output: { context: string[]; prompt?: string },
+    ): Promise<void> => {
+      await precompactFlushHook['experimental.session.compacting'](
+        input,
+        output,
+      );
     },
 
     // Inject phase reminder and filter available skills before sending to
