@@ -152,7 +152,7 @@ export const EscalationSchema = z.object({
       resolved_at: z.string(),
       resolved_by: z.string(),
     })
-    .optional(),
+    .nullish(),
 });
 
 export type Escalation = z.infer<typeof EscalationSchema>;

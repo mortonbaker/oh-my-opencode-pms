@@ -39,7 +39,7 @@ export interface LoadPluginConfigOptions {
   silent?: boolean;
 }
 
-const PROMPTS_DIR_NAME = 'oh-my-opencode-slim';
+const PROMPTS_DIR_NAME = 'oh-my-opencode-pms';
 
 /**
  * Load and validate plugin configuration from a specific file path.
@@ -171,13 +171,13 @@ export function findPluginConfigPaths(directory: string): {
 } {
   const userConfigPath = findConfigPathInDirs(
     getConfigSearchDirs(),
-    'oh-my-opencode-slim',
+    'oh-my-opencode-pms',
   );
 
   const projectConfigBasePath = path.join(
     directory,
     '.opencode',
-    'oh-my-opencode-slim',
+    'oh-my-opencode-pms',
   );
 
   const projectConfigPath = findConfigPath(projectConfigBasePath);

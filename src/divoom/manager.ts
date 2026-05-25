@@ -98,7 +98,7 @@ export function getDivoomOutDir(homeDir = os.homedir()): string {
     baseDir,
     'opencode',
     'storage',
-    'oh-my-opencode-slim',
+    'oh-my-opencode-pms',
     'divoom',
     'captures',
   );
