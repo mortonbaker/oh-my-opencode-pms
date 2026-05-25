@@ -41,6 +41,7 @@ import {
   createHarnessDeployTool,
   createParallelDetectorHook,
 } from './harness';
+import { ScopeGate } from './governance/scope-gate';
 import { createInterviewManager } from './interview';
 import { createBuiltinMcps } from './mcp';
 import {
@@ -154,6 +155,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let criteriaValidatorHook: ReturnType<typeof createCriteriaValidatorHook>;
   let dispatchJudgeHook: ReturnType<typeof createDispatchJudgeHook>;
   let harnessDeployTool: ReturnType<typeof createHarnessDeployTool>;
+  const scopeGate = new ScopeGate();
   let interviewManager: ReturnType<typeof createInterviewManager>;
   let presetManager: ReturnType<typeof createPresetManager>;
   let divoomManager: ReturnType<typeof createDivoomManager>;
@@ -805,6 +807,17 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         if (depthTracker && childSessionId && parentSessionId) {
           depthTracker.registerChild(parentSessionId, childSessionId);
         }
+        // Scope gate: bind a queued architect-approved slice from the parent
+        // dispatch context to this newly-created subagent session.
+        if (childSessionId && parentSessionId) {
+          scopeGate.claimChild(parentSessionId, childSessionId);
+        }
+      }
+
+      if (event.type === 'session.deleted') {
+        const id =
+          event.properties?.info?.id ?? event.properties?.sessionID;
+        if (id) scopeGate.release(id);
       }
 
       // Handle multiplexer pane spawning for OpenCode's Task tool sessions
@@ -943,6 +956,50 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         },
         { args: (output as { args?: unknown }).args },
       );
+
+      // Scope gate: capture architect-approved slice on task dispatch.
+      // The slice's file_changes + verification_commands get bound to the
+      // child subagent session via the session.created event handler.
+      const inTool = input as {
+        tool: string;
+        sessionID?: string;
+        callID?: string;
+      };
+      const outArgs = (output as { args?: Record<string, unknown> }).args;
+      if (
+        inTool.tool === 'task' &&
+        inTool.sessionID &&
+        inTool.callID &&
+        typeof outArgs?.prompt === 'string'
+      ) {
+        scopeGate.recordDispatch(
+          inTool.sessionID,
+          inTool.callID,
+          outArgs.prompt,
+        );
+      }
+
+      // Scope gate: hard-block out-of-scope Edit / Write / Bash calls from
+      // subagent sessions that have a registered architect-approved slice.
+      // Passes through when no slice is registered (ad-hoc work falls back
+      // to per-agent default permissions). Throws SCOPE_VIOLATION instead
+      // of prompting the user.
+      if (inTool.tool !== 'task') {
+        const scopeResult = scopeGate.check(
+          inTool.sessionID,
+          inTool.tool,
+          outArgs,
+          ctx.directory,
+        );
+        if (scopeResult.decision === 'deny') {
+          log('[scope-gate] denied tool call', {
+            sessionID: inTool.sessionID,
+            tool: inTool.tool,
+            reason: scopeResult.reason,
+          });
+          throw new Error(scopeResult.reason ?? 'SCOPE_VIOLATION');
+        }
+      }
 
       await applyPatchHook['tool.execute.before'](
         input as {

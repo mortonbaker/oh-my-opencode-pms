@@ -36,8 +36,36 @@ For each plan you produce:
 <go/no-go on net-new infrastructure with explicit justification>
 </decision>
 <slices>
-- slice-1: <id, title, file_changes[], acceptance_criteria[], complexity_estimate, risks[]>
-- slice-2: ...
+For EACH slice, emit a machine-parseable JSON block:
+
+<slice>
+{
+  "id": "feature.user-login",
+  "title": "Wire login form to /api/v1/auth",
+  "file_changes": [
+    "src/auth/login.tsx",
+    "src/auth/login.test.tsx"
+  ],
+  "verification_commands": [
+    "bun test src/auth",
+    "tsc --noEmit",
+    "biome check src/auth"
+  ],
+  "acceptance_criteria": [
+    "[ ] form submission returns HTTP 200 with body matching /^\\\\{\"ok\":true/",
+    "[ ] tsc --noEmit exits 0",
+    "[ ] biome check src/auth exits 0"
+  ],
+  "complexity_estimate": "M",
+  "risks": ["session-cookie collision with /api/v1/admin"]
+}
+</slice>
+
+The JSON block is REQUIRED. The project-manager forwards it verbatim to the
+builder, where the scope-gate hook parses file_changes + verification_commands
+to auto-allow in-scope tool calls and hard-deny out-of-scope ones. Vague or
+missing JSON = no scope binding = user has to click through every permission
+prompt = your plan failed.
 </slices>
 <risks>
 - <risk>: blast_radius=<...>, mitigation=<...>

@@ -39,6 +39,58 @@ type AgentFactory = (
 ) => AgentDefinition;
 
 const COUNCIL_TOOL_ALLOWED_AGENTS = new Set(['council']);
+
+/**
+ * Per-agent default permissions for bash / edit / write / webfetch.
+ *
+ * These are the fallback when no architect-approved slice is registered for
+ * the subagent's session (i.e. ad-hoc work outside a planned phase). When a
+ * slice IS registered, the scope-gate hook (src/governance/scope-gate/) takes
+ * over and gates tool calls against file_changes + verification_commands —
+ * these defaults don't apply in that case.
+ *
+ * The intent: subagents that are read-only by design (architect, researcher,
+ * judge, synthesizer, observer) get bash:allow so they can inspect the
+ * codebase without prompts, but edit/write are hard-denied. Builder gets
+ * everything allowed because the slice gate is the real safety net. Triage
+ * has everything denied because it's a JSON-only classifier.
+ */
+const DEFAULT_AGENT_PERMISSIONS: Record<
+  string,
+  Partial<{
+    bash: 'ask' | 'allow' | 'deny';
+    edit: 'ask' | 'allow' | 'deny';
+    write: 'ask' | 'allow' | 'deny';
+    webfetch: 'ask' | 'allow' | 'deny';
+  }>
+> = {
+  'project-manager': {
+    bash: 'ask',
+    edit: 'ask',
+    write: 'ask',
+    webfetch: 'allow',
+  },
+  architect: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
+  researcher: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
+  synthesizer: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'deny' },
+  triage: { bash: 'deny', edit: 'deny', write: 'deny', webfetch: 'deny' },
+  builder: {
+    bash: 'allow',
+    edit: 'allow',
+    write: 'allow',
+    webfetch: 'deny',
+  },
+  judge: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
+  'qa-reviewer': {
+    bash: 'allow',
+    edit: 'deny',
+    write: 'deny',
+    webfetch: 'deny',
+  },
+  observer: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'deny' },
+  council: { bash: 'ask', edit: 'ask', write: 'ask', webfetch: 'allow' },
+  councillor: { bash: 'deny', edit: 'deny', write: 'deny', webfetch: 'deny' },
+};
 const SAFE_AGENT_ALIAS_RE = /^[a-z][a-z0-9_-]*$/i;
 
 function normalizeDisplayName(displayName: string): string {
@@ -182,10 +234,24 @@ function applyDefaultPermissions(
     ? (existing.council_session ?? 'allow')
     : 'deny';
 
+  // Per-agent bash/edit/write/webfetch defaults — user-config wins; only
+  // fill in fields the user hasn't set explicitly. Scope gate overrides
+  // these at runtime when a slice is registered for the session.
+  const roleDefaults = DEFAULT_AGENT_PERMISSIONS[agent.name] ?? {};
+  const bashPerm = (existing.bash as 'ask' | 'allow' | 'deny' | undefined) ?? roleDefaults.bash;
+  const editPerm = (existing.edit as 'ask' | 'allow' | 'deny' | undefined) ?? roleDefaults.edit;
+  const writePerm = (existing.write as 'ask' | 'allow' | 'deny' | undefined) ?? roleDefaults.write;
+  const webfetchPerm =
+    (existing.webfetch as 'ask' | 'allow' | 'deny' | undefined) ?? roleDefaults.webfetch;
+
   agent.config.permission = {
     ...existing,
     question: questionPerm,
     council_session: councilSessionPerm,
+    ...(bashPerm ? { bash: bashPerm } : {}),
+    ...(editPerm ? { edit: editPerm } : {}),
+    ...(writePerm ? { write: writePerm } : {}),
+    ...(webfetchPerm ? { webfetch: webfetchPerm } : {}),
     // Apply skill permissions as nested object under 'skill' key
     skill: {
       ...(typeof existing.skill === 'object' ? existing.skill : {}),

@@ -176,6 +176,36 @@ If the request requires NEW infrastructure (a service, plugin, router, middlewar
 - Brief user on delegation goal before each call
 - Skip delegation if overhead ≥ doing it yourself
 
+**Slice forwarding (CRITICAL for zero-prompt execution):**
+When @architect returns a plan with <slice>{...}</slice> JSON blocks, you
+MUST embed the slice JSON verbatim in the dispatch prompt to @builder and
+@qa-reviewer. The scope-gate hook parses file_changes + verification_commands
+from the slice to auto-allow in-scope Edit/Write/Bash without prompting the
+user, and to hard-deny out-of-scope work without prompting either.
+
+Example dispatch:
+
+  task({
+    subagent_type: "builder",
+    prompt: \`
+      Execute slice feature.user-login.
+
+      <slice>
+      {
+        "id": "feature.user-login",
+        "file_changes": ["src/auth/login.tsx", "src/auth/login.test.tsx"],
+        "verification_commands": ["bun test src/auth", "tsc --noEmit"],
+        "acceptance_criteria": [...]
+      }
+      </slice>
+
+      Build per the file_changes list. Run the verification_commands when done.
+    \`
+  })
+
+If you forget the slice JSON, the builder gets the same permission prompts
+the human would see — defeats the whole point. ALWAYS include the slice.
+
 ## 4. Split and Parallelize
 Can tasks be split into subtasks and run in parallel?
 ${enabledParallelExamples}
