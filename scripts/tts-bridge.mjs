@@ -63,11 +63,29 @@ async function rescan() {
 await rescan();
 console.log(`[tts-bridge] queue seeded with ${queue.length} mp3(s)`);
 
+/** SSE subscribers — pushed-to whenever fs.watch fires a new mp3 */
+const sseClients = new Set();
+
+function broadcast(event) {
+  const payload = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+  for (const c of sseClients) {
+    try {
+      c.write(payload);
+    } catch {
+      sseClients.delete(c);
+    }
+  }
+}
+
 watch(TMP_DIR, async (eventType, filename) => {
   if (filename && PATTERN.test(filename)) {
+    const before = queue.length;
     await rescan();
     const latest = queue[queue.length - 1];
-    if (latest) console.log(`[tts-bridge] queued: ${latest.path} (idx=${latest.idx})`);
+    if (latest && queue.length !== before) {
+      console.log(`[tts-bridge] queued: ${latest.path} (idx=${latest.idx})`);
+      broadcast({ type: 'new-audio', idx: latest.idx, mtime: latest.mtime });
+    }
   }
 });
 
@@ -116,6 +134,7 @@ const repeatBtn = document.getElementById('repeat');
 
 let autoplay = true;
 let currentIdx = 0;
+let sseConnected = false;
 
 autoplayBtn.onclick = () => {
   autoplay = !autoplay;
@@ -127,34 +146,73 @@ repeatBtn.onclick = () => {
   if (currentIdx) { player.currentTime = 0; player.play(); }
 };
 
-async function tick() {
+// Unlock autoplay on first user gesture (any click anywhere)
+let unlocked = false;
+function unlock() {
+  if (unlocked) return;
+  unlocked = true;
+  // Silent prime: load + briefly play a 0-volume sample to unlock the audio context
+  player.volume = 1.0;
+  document.body.removeEventListener('click', unlock);
+}
+document.body.addEventListener('click', unlock, { once: true });
+
+function playIdx(idx) {
+  if (idx === currentIdx) return;
+  currentIdx = idx;
+  player.src = '/audio/' + idx;
+  if (autoplay) {
+    player.play().catch(e => {
+      console.warn('autoplay blocked — click anywhere to unlock:', e.message);
+      status.textContent = '⚠ click "replay current" once to unlock autoplay';
+    });
+  }
+}
+
+async function refreshQueue() {
   try {
     const r = await fetch('/api/latest');
     const j = await r.json();
-    status.textContent = 'queue: ' + j.queue.length + ' · latest idx: ' + (j.latest?.idx ?? '-')
-      + ' · last poll: ' + new Date().toLocaleTimeString();
-
-    if (j.latest && j.latest.idx !== currentIdx) {
-      currentIdx = j.latest.idx;
-      const audioUrl = '/audio/' + currentIdx;
-      player.src = audioUrl;
-      if (autoplay) player.play().catch(e => console.warn('autoplay blocked:', e.message));
-    }
-
+    status.textContent = (sseConnected ? '● live' : '○ polling')
+      + ' · queue: ' + j.queue.length
+      + ' · latest idx: ' + (j.latest?.idx ?? '-')
+      + ' · ' + new Date().toLocaleTimeString();
     queueEl.innerHTML = j.queue.slice().reverse().map(q =>
       '<div class="row' + (q.idx === currentIdx ? ' current' : '') + '">'
       + '<span class="idx">#' + q.idx + '</span>'
       + '<span class="age">' + Math.round((Date.now() - q.mtime) / 1000) + 's ago</span>'
-      + '<a href="/audio/' + q.idx + '" style="color: #6ac;">play</a>'
+      + '<a href="/audio/' + q.idx + '" style="color: #6ac;" onclick="event.preventDefault(); playIdx(' + q.idx + ');">play</a>'
       + '</div>'
     ).join('');
+    // First-load: auto-load the latest so a manual play tap actually plays something
+    if (j.latest && currentIdx === 0) {
+      currentIdx = j.latest.idx;
+      player.src = '/audio/' + currentIdx;
+    }
   } catch (e) {
-    status.textContent = 'poll error: ' + e.message;
+    status.textContent = 'fetch error: ' + e.message;
   }
 }
 
-tick();
-setInterval(tick, 2000);
+// Server-Sent Events: instant push on new audio, no 2s polling lag
+function connectSSE() {
+  const es = new EventSource('/api/stream');
+  es.onopen = () => { sseConnected = true; refreshQueue(); };
+  es.onerror = () => { sseConnected = false; setTimeout(connectSSE, 3000); es.close(); };
+  es.addEventListener('new-audio', (msg) => {
+    const data = JSON.parse(msg.data);
+    playIdx(data.idx);
+    refreshQueue();
+  });
+}
+
+// Initial load + start SSE + fallback poll every 10s
+refreshQueue();
+connectSSE();
+setInterval(refreshQueue, 10000);
+
+// expose for inline onclick handler
+window.playIdx = playIdx;
 </script>
 </body>
 </html>`;
@@ -176,6 +234,47 @@ Bun.serve({
           name: path.split('/').pop(),
         })),
         latest: latest ? { idx: latest.idx, mtime: latest.mtime } : null,
+      });
+    }
+    if (url.pathname === '/api/stream') {
+      // Server-Sent Events: push on every new mp3 (fs.watch trigger).
+      // The browser auto-plays the moment the file lands — no 2s poll lag.
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          const writeFn = {
+            write(chunk) {
+              controller.enqueue(encoder.encode(chunk));
+            },
+          };
+          // hello + initial state
+          controller.enqueue(encoder.encode(': connected\n\n'));
+          const latest = queue[queue.length - 1];
+          if (latest) {
+            controller.enqueue(encoder.encode(
+              `event: hello\ndata: ${JSON.stringify({ idx: latest.idx, mtime: latest.mtime })}\n\n`,
+            ));
+          }
+          sseClients.add(writeFn);
+          // heartbeat every 15s so proxies don't kill the connection
+          const hb = setInterval(() => {
+            try { controller.enqueue(encoder.encode(': hb\n\n')); }
+            catch { clearInterval(hb); sseClients.delete(writeFn); }
+          }, 15000);
+          req.signal?.addEventListener('abort', () => {
+            clearInterval(hb);
+            sseClients.delete(writeFn);
+            try { controller.close(); } catch {}
+          });
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
       });
     }
     const m = url.pathname.match(/^\/audio\/(\d+)$/);
