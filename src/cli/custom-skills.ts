@@ -46,6 +46,40 @@ export const CUSTOM_SKILLS: CustomSkill[] = [
     allowedAgents: ['orchestrator'],
     sourcePath: 'src/skills/clonedeps',
   },
+  {
+    name: 'roster-print',
+    description:
+      'Print active harness preset, pantheon roster, model bindings, plugin stack, and dispatch syntax',
+    allowedAgents: ['project-manager', 'orchestrator'],
+    sourcePath: 'src/skills/roster-print',
+  },
+  {
+    name: 'falsifiable-criteria',
+    description:
+      'Vocabulary and worked examples for authoring falsifiable success criteria (criteria-validator contract)',
+    allowedAgents: [
+      'project-manager',
+      'orchestrator',
+      'architect',
+      'judge',
+      'qa-reviewer',
+    ],
+    sourcePath: 'src/skills/falsifiable-criteria',
+  },
+  {
+    name: 'harness-deploy',
+    description:
+      'Canary-then-fanout deployment workflow for the opencode-harness codebase',
+    allowedAgents: ['project-manager', 'orchestrator'],
+    sourcePath: 'src/skills/harness-deploy',
+  },
+  {
+    name: 'parallelization-template',
+    description:
+      'Decomposition contract for parallel subagent dispatch (parallel-detector contract)',
+    allowedAgents: ['project-manager', 'orchestrator'],
+    sourcePath: 'src/skills/parallelization-template',
+  },
 ];
 
 /**

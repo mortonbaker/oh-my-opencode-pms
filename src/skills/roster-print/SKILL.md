@@ -14,7 +14,7 @@ deterministic answer to "what subagents can I actually spawn here?".
 - At session start if the orchestrator hasn't yet read the environment
 - When `@fixer` (or any pantheon role) doesn't work as expected
 - After switching presets via `/preset`
-- After editing `~/.config/opencode/oh-my-opencode-slim.json`
+- After editing `~/.config/opencode/oh-my-opencode-pms.json`
 - Whenever the operator asks "what agents do I have"
 
 ## Procedure
@@ -29,7 +29,7 @@ cat ~/.config/opencode/opencode.jsonc | head -40
 # 2. Active preset + full roster
 echo ""
 echo "=== ACTIVE PRESET ==="
-jq -r '.preset' ~/.config/opencode/oh-my-opencode-slim.json
+jq -r '.preset' ~/.config/opencode/oh-my-opencode-pms.json
 
 echo ""
 echo "=== ROSTER (model · variant · skills · mcps) ==="
@@ -37,7 +37,7 @@ jq -r '
   .preset as $p |
   .presets[$p] | to_entries[] |
   "\(.key)\t\(.value.model)\t\(.value.variant // "-")\t\((.value.skills // []) | join(","))\t\((.value.mcps // []) | join(","))"
-' ~/.config/opencode/oh-my-opencode-slim.json | column -t -s $'\t'
+' ~/.config/opencode/oh-my-opencode-pms.json | column -t -s $'\t'
 
 # 3. Custom .md subagents (rare)
 echo ""
@@ -58,10 +58,6 @@ cat <<'EOF'
 Auto: opencode's `task` tool routes per orchestrator delegation rules.
 Manual: type `@agentname <task>` in your reply text.
 Subtask: `/subtask <description>` for a bounded child worker.
-
-NOTE: the slim pantheon is NOT in the Agent tool's `subagent_type` enum.
-That enum is a separate Claude Code SDK layer (`general-purpose`, `Explore`,
-`Plan`, `statusline-setup`). If `@fixer` isn't there, that's expected.
 EOF
 ```
 
@@ -76,6 +72,6 @@ Pure shell + jq. Zero tokens. Sub-second on any machine.
 
 ## Failure modes
 
-- `oh-my-opencode-slim.json` missing → emit a clear "slim plugin not configured" notice and a pointer to `bunx oh-my-opencode-slim@latest install`.
+- `oh-my-opencode-pms.json` missing → emit a clear "pms plugin not configured" notice and a pointer to `bunx oh-my-opencode-pms@latest install`.
 - `opencode.jsonc` missing → emit "not in opencode; you are in vanilla Claude Code or some other runtime".
 - `jq` missing → fall back to `cat` and tell the operator to install jq.

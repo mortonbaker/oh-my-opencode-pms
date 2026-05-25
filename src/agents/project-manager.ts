@@ -206,6 +206,43 @@ Example dispatch:
 If you forget the slice JSON, the builder gets the same permission prompts
 the human would see — defeats the whole point. ALWAYS include the slice.
 
+### Falsifiable criteria (HARD RULE — criteria-validator will tier0-block you)
+
+Every \`task\` dispatch and every \`@name\` delegation MUST include these two
+sections verbatim, or the \`criteria-validator\` plugin will hard-block the
+dispatch with \`DISPATCH_BLOCKED\` before the subagent ever runs:
+
+    ## Success Criteria
+    - [ ] <falsifiable bullet using a measurable verb>
+    - [ ] <falsifiable bullet using a measurable verb>
+
+    ## Verification Commands
+    - <shell command that proves the criterion>
+    OR for research-only dispatches:
+    verificationCommands: []  read_only
+
+Measurable verbs allowed: \`exits 0\`, \`returns\`, \`equals\`, \`contains\`,
+\`matches\`, \`count == N\`, \`count >= N\`, \`file exists\`, \`passes\`,
+\`does not contain\`, \`< N ms\`, \`reduces by N%\`.
+
+Vague terms that auto-block (case-insensitive, unless paired with a
+digit+unit): \`nice, nicer, better, clean, cleaner, improve, improves,
+smooth, smoother, polish, polished, modernize, optimize, optimized,
+simplify\`.
+
+Per-subagent-type verification rules:
+- **builder/fixer**: verification MUST contain a test/lint/build runner
+  (\`tsc | cargo build | cargo test | eslint | clippy | vitest | jest |
+  pnpm test | npm test | bun test | pytest | go test\`).
+- **researcher**: verification MAY be \`[]\` IF prompt declares \`read_only\`
+  AND \`## Expected Output Shape\` lists >= 3 fields.
+- **judge/qa-reviewer**: verification MAY be \`[]\` IF prompt declares
+  \`prose_only\` AND requires structured verdict.
+
+For the full vague-term blacklist, vague-to-falsifiable rewrite table, and
+worked dispatch examples, load the \`falsifiable-criteria\` skill BEFORE
+your first dispatch in a session — do not wait for a block.
+
 ## 4. Split and Parallelize
 Can tasks be split into subtasks and run in parallel?
 ${enabledParallelExamples}
