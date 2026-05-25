@@ -1,0 +1,18 @@
+[Unit]
+Description=opencode-tts bridge — exposes /tmp/opencode-tts-*.mp3 to the tailnet
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.bun/bin/bun %h/Code/oh-my-opencode-pms/scripts/tts-bridge.mjs
+ExecStartPost=/usr/bin/tailscale serve --bg --https=8445 --set-path=/ http://localhost:8445
+ExecStopPost=/usr/bin/tailscale serve --https=8445 off
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.local/share/opencode/tts-bridge.log
+StandardError=append:%h/.local/share/opencode/tts-bridge.log
+Environment=TTS_BRIDGE_PORT=8445
+
+[Install]
+WantedBy=default.target

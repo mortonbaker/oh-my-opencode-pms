@@ -115,6 +115,33 @@ canary:
     @echo "harness-deploy canary stage — see SKILL.md for the full protocol"
     @echo "(this is a placeholder; real canary uses the harness_deploy tool)"
 
+# ---- tts-bridge (listen to opencode TTS on any tailnet device) ---------
+
+# Start the TTS bridge web server (8445) + expose via tailscale serve.
+# Once running, open https://atlas01.tail00ae77.ts.net:8445/ in any browser
+# on a tailscale-connected device (Studio_PC, phone, laptop) to hear summaries.
+tts-bridge-start:
+    @pkill -f tts-bridge.mjs 2>/dev/null || true
+    @nohup bun {{justfile_directory()}}/scripts/tts-bridge.mjs > /tmp/tts-bridge.log 2>&1 &
+    @sleep 1
+    @tailscale serve --bg --https=8445 --set-path=/ http://localhost:8445 2>&1 | tail -3
+    @echo ""
+    @echo "→ Open: https://atlas01.tail00ae77.ts.net:8445/"
+
+# Stop the TTS bridge + remove the tailscale serve mapping
+tts-bridge-stop:
+    @pkill -f tts-bridge.mjs 2>/dev/null && echo "stopped bun watcher" || echo "(not running)"
+    @tailscale serve --https=8445 off 2>/dev/null && echo "removed tailscale serve mapping" || true
+
+# Show bridge status (PID + tailnet URL + last log lines)
+tts-bridge-status:
+    @pgrep -af tts-bridge.mjs | head -3 || echo "(not running)"
+    @echo ""
+    @tailscale serve status 2>&1 | grep 8445 || echo "(no tailscale serve mapping on 8445)"
+    @echo ""
+    @echo "--- last 5 lines of /tmp/tts-bridge.log ---"
+    @tail -5 /tmp/tts-bridge.log 2>/dev/null || echo "(no log yet)"
+
 # ---- adr / remember -----------------------------------------------------
 
 # Show recent decisions (ADR records)
