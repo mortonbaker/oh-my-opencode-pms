@@ -32,8 +32,10 @@ const VALID_TYPES = new Set([
   'drift',
   'fact',
   'workflow',
+  'pattern',                // "we did X, it worked, do X again next time"
   'archive_summary',
   'research_gate_violation',
+  'session_debrief',        // emitted by /debrief command
   'manual',
 ]);
 

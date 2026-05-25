@@ -10,6 +10,7 @@ export {
 } from './foreground-fallback';
 export { processImageAttachments } from './image-hook';
 export { createJsonErrorRecoveryHook } from './json-error-recovery';
+export { createDebriefPromptHook } from './debrief-prompt';
 export { createPhaseReminderHook } from './phase-reminder';
 export { createPostFileToolNudgeHook } from './post-file-tool-nudge';
 export { createPrecompactFlushHook } from './precompact-flush';

@@ -27,6 +27,7 @@ import {
   createDelegateTaskRetryHook,
   createFilterAvailableSkillsHook,
   createJsonErrorRecoveryHook,
+  createDebriefPromptHook,
   createPhaseReminderHook,
   createPostFileToolNudgeHook,
   createPrecompactFlushHook,
@@ -37,6 +38,7 @@ import {
   ForegroundFallbackManager,
 } from './hooks';
 import { createRememberCommand } from './commands/remember';
+import { createDebriefCommand } from './commands/debrief';
 import { createTtsSpeakCommand } from './commands/tts-speak';
 import { processImageAttachments } from './hooks/image-hook';
 import {
@@ -146,6 +148,8 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let researchGateHook: ReturnType<typeof createResearchGateHook>;
   let rememberCommand: ReturnType<typeof createRememberCommand>;
   let ttsSpeakCommand: ReturnType<typeof createTtsSpeakCommand>;
+  let debriefCommand: ReturnType<typeof createDebriefCommand>;
+  let debriefPromptHook: ReturnType<typeof createDebriefPromptHook>;
   let filterAvailableSkillsHook: ReturnType<
     typeof createFilterAvailableSkillsHook
   >;
@@ -301,6 +305,10 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       getAgentName: (sessionID) => sessionAgentMap.get(sessionID),
     });
     ttsSpeakCommand = createTtsSpeakCommand();
+    debriefCommand = createDebriefCommand({
+      getAgentName: (sessionID) => sessionAgentMap.get(sessionID),
+    });
+    debriefPromptHook = createDebriefPromptHook();
 
     // Initialize available skills filter hook
     filterAvailableSkillsHook = createFilterAvailableSkillsHook(ctx, config);
@@ -781,9 +789,11 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       subtaskCommandManager.registerCommand(opencodeConfig);
       rememberCommand.registerCommand(opencodeConfig);
       ttsSpeakCommand.registerCommand(opencodeConfig);
+      debriefCommand.registerCommand(opencodeConfig);
     },
 
     event: async (input) => {
+      if (debriefPromptHook) debriefPromptHook.handleEvent(input.event as { type: string; properties?: Record<string, unknown> });
       const event = input.event as {
         type: string;
         properties?: {
@@ -1100,6 +1110,15 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         output as { parts: Array<{ type: string; text?: string }> },
       );
 
+      await debriefCommand.handleCommandExecuteBefore(
+        input as {
+          command: string;
+          sessionID: string;
+          arguments: string;
+        },
+        output as { parts: Array<{ type: string; text?: string }> },
+      );
+
       await rememberCommand.handleCommandExecuteBefore(
         input as {
           command: string;
@@ -1270,6 +1289,10 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       await researchGateHook['experimental.chat.messages.transform'](
         input,
         typedOutput,
+      );
+      await debriefPromptHook['experimental.chat.messages.transform'](
+        input,
+        typedOutput as Parameters<typeof debriefPromptHook['experimental.chat.messages.transform']>[1],
       );
       await filterAvailableSkillsHook['experimental.chat.messages.transform'](
         input,

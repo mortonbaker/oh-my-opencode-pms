@@ -149,6 +149,16 @@ adr-list:
     @ls -1t ~/.local/share/agent-memory/decisions/ 2>/dev/null | head -10 || \
         echo "(no decisions yet — use /remember in opencode or  just remember <text>)"
 
+# Show recent debrief digests
+debrief-list:
+    @ls -1t ~/.local/share/agent-memory/debriefs/ 2>/dev/null | head -10 || \
+        echo "(no debriefs yet — use /debrief in opencode)"
+
+# Show contents of the most recent debrief digest
+debrief-latest:
+    @latest=$(ls -1t ~/.local/share/agent-memory/debriefs/*.md 2>/dev/null | head -1); \
+    if [ -n "$latest" ]; then cat "$latest"; else echo "(no debriefs yet)"; fi
+
 # Append a quick decision from the CLI
 remember TEXT:
     agent-mem append --type=decision --tags=cli "{{TEXT}}"

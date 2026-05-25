@@ -251,6 +251,7 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 |---|---|---|
 | `apply-patch` | `src/hooks/apply-patch/index.ts` | `'tool.execute.before'` |
 | `auto-update-checker` | `src/hooks/auto-update-checker/index.ts` | `'session.created'` |
+| `debrief-prompt` | `src/hooks/debrief-prompt/index.ts` | `'chat.message','experimental.chat.messages.transform','session.idle'` |
 | `delegate-task-retry` | `src/hooks/delegate-task-retry/index.ts` | `(see source)` |
 | `filter-available-skills` | `src/hooks/filter-available-skills/index.ts` | `'experimental.chat.messages.transform'` |
 | `foreground-fallback` | `src/hooks/foreground-fallback/index.ts` | `'session.deleted','session.error','session.status'` |
@@ -306,8 +307,9 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 <!-- AUTOGEN:commands -->
 | Command | File | Description |
 |---|---|---|
+| `/debrief` | `src/commands/debrief.ts` | (see source) |
 | `/remember` | `src/commands/remember.ts` | (see source) |
 | `/tts-speak` | `src/commands/tts-speak.ts` | (see source) |
 <!-- /AUTOGEN:commands -->
 
-<!-- AUTOGEN:last-refresh 2026-05-25T22:10:09.956203Z -->
+<!-- AUTOGEN:last-refresh 2026-05-25T22:23:18.170738Z -->
