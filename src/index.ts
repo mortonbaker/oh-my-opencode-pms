@@ -29,6 +29,7 @@ import {
   createJsonErrorRecoveryHook,
   createPhaseReminderHook,
   createPostFileToolNudgeHook,
+  createResearchGateHook,
   createSessionGoalHook,
   createTaskSessionManagerHook,
   createTodoContinuationHook,
@@ -138,6 +139,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let multiplexerSessionManager: MultiplexerSessionManager;
   let autoUpdateChecker: ReturnType<typeof createAutoUpdateCheckerHook>;
   let phaseReminderHook: ReturnType<typeof createPhaseReminderHook>;
+  let researchGateHook: ReturnType<typeof createResearchGateHook>;
   let filterAvailableSkillsHook: ReturnType<
     typeof createFilterAvailableSkillsHook
   >;
@@ -287,6 +289,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
 
     // Initialize phase reminder hook for workflow compliance
     phaseReminderHook = createPhaseReminderHook();
+    researchGateHook = createResearchGateHook();
 
     // Initialize available skills filter hook
     filterAvailableSkillsHook = createFilterAvailableSkillsHook(ctx, config);
@@ -1218,6 +1221,10 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         typedOutput,
       );
       await phaseReminderHook['experimental.chat.messages.transform'](
+        input,
+        typedOutput,
+      );
+      await researchGateHook['experimental.chat.messages.transform'](
         input,
         typedOutput,
       );

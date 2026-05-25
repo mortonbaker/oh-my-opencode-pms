@@ -1,0 +1,9 @@
+{
+  "title": "Metadata Title Generator",
+  "description": "Generates concise metadata titles for coding agents based on user prompts",
+  "model": "nemotron-3-super-free",
+  "tools": ["read", "write", "grep", "glob"],
+  "instrumentation": {
+    "approximate_tokens": 100
+  }
+}

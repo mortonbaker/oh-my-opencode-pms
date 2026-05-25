@@ -1,0 +1,6 @@
+{
+  "name": "metadata_generator",
+  "description": "Generates metadata for coding agents based on user prompts",
+  "model": "nemotron-3-super-free",
+  "tools": ["read", "write", "glob", "grep", "question"]
+}

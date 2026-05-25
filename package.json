@@ -1,7 +1,7 @@
 {
   "name": "oh-my-opencode-pms",
   "version": "0.1.0",
-  "description": "Project Management System pantheon for OpenCode — fork of oh-my-opencode-slim with PMS roster (project-manager / architect / builder / judge / qa-reviewer / researcher) and built-in governance hooks",
+  "description": "Project Management System pantheon for OpenCode \u2014 fork of oh-my-opencode-slim with PMS roster (project-manager / architect / builder / judge / qa-reviewer / researcher) and built-in governance hooks",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -17,7 +17,8 @@
   "bin": {
     "oh-my-opencode-slim": "./dist/cli/index.js",
     "pms-gate": "./dist/governance/cli/gate.js",
-    "pms-run-phase": "./dist/governance/cli/run-phase-cli.js"
+    "pms-run-phase": "./dist/governance/cli/run-phase-cli.js",
+    "agent-mem": "./dist/cli/agent-mem.js"
   },
   "type": "module",
   "license": "MIT",

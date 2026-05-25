@@ -12,6 +12,7 @@ export { processImageAttachments } from './image-hook';
 export { createJsonErrorRecoveryHook } from './json-error-recovery';
 export { createPhaseReminderHook } from './phase-reminder';
 export { createPostFileToolNudgeHook } from './post-file-tool-nudge';
+export { createResearchGateHook } from './research-gate';
 export { createSessionGoalHook } from './session-goal';
 export { createTaskSessionManagerHook } from './task-session-manager';
 export { createTodoContinuationHook } from './todo-continuation';

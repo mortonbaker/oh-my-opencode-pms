@@ -1,0 +1,71 @@
+{
+  "$schema": "https://opencode.ai/schemas/oh-my-opencode-slim.json",
+  "preset": "pms",
+  "presets": {
+    "pms": {
+      "orchestrator": {
+        "model": [
+          "anthropic/claude-opus-4-7",
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+          "minimax-coding-plan/MiniMax-M2.7-highspeed"
+        ],
+        "skills": ["*"],
+        "mcps": ["*"]
+      },
+      "architect": {
+        "model": [
+          "google/gemini-3.1-pro-preview",
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+          "minimax-coding-plan/MiniMax-M2.7-highspeed"
+        ],
+        "skills": ["simplify", "codemap", "falsifiable-criteria"],
+        "mcps": ["mem0"]
+      },
+      "researcher": {
+        "model": [
+          "minimax-coding-plan/MiniMax-M2.7-highspeed",
+          "google/gemini-3.1-pro-preview",
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+        ],
+        "skills": ["codemap", "clonedeps"],
+        "mcps": []
+      },
+      "synthesizer": {
+        "model": [
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+          "google/gemini-3.1-pro-preview",
+          "minimax-coding-plan/MiniMax-M2.7-highspeed"
+        ],
+        "skills": ["simplify"],
+        "mcps": []
+      },
+      "builder": {
+        "model": [
+          "zai-coding-plan/glm-5.1",
+          "minimax-coding-plan/MiniMax-M2.7-highspeed",
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+        ],
+        "skills": [],
+        "mcps": []
+      },
+      "judge": {
+        "model": [
+          "crof/deepseek-v4-pro",
+          "anthropic/claude-opus-4-7",
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+        ],
+        "skills": ["simplify", "falsifiable-criteria"],
+        "mcps": ["mem0"]
+      },
+      "qa-reviewer": {
+        "model": [
+          "minimax-coding-plan/MiniMax-M2.7-highspeed",
+          "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+          "crof/deepseek-v4-pro"
+        ],
+        "skills": ["falsifiable-criteria"],
+        "mcps": []
+      }
+    }
+  }
+}

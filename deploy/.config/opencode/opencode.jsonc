@@ -1,0 +1,78 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Plugins load in order. Each one's role:
+  "plugin": [
+    // Bridges opencode to the Claude CLI (uses your Max subscription, no API key).
+    // Auto-discovers ~/.claude/.credentials.json. Exposes Claude models without metering.
+    "opencode-claude-bridge",
+
+    // Anthropic Claude Pro/Max OAuth — redundant safety net alongside the bridge.
+    // Lets opencode resolve anthropic/* model strings via your Max subscription.
+    "opencode-anthropic-oauth",
+
+    // Gemini CLI OAuth — lets opencode resolve google/* model strings using your
+    // gemini-cli auth (no API key, no Google AI Studio key needed).
+    "opencode-gemini-auth",
+
+    // Registers this opencode instance with the Paseo daemon (port 6767) so the
+    // remote dashboard can monitor/control this session.
+    "./plugins/paseo-autoregister.mjs",
+
+    // The PMS pantheon + harness. Forked from oh-my-opencode-slim. Roster:
+    // project-manager (primary) + architect/builder/judge/qa-reviewer/
+    // researcher/synthesizer/triage/observer/council/councillor. Harness
+    // (parallel-detector, criteria-validator, dispatch-judge, harness_deploy
+    // tool) is folded INTO this plugin as of v0.1.0 — no separate plugin
+    // entries needed.
+    //
+    // Roster + model bindings come from
+    // ~/.config/opencode/oh-my-opencode-pms.json (read `preset` and
+    // `presets.<name>`).
+    "oh-my-opencode-pms",
+
+    // opencode-memsearch — per-turn haiku summary of conversation +
+    // cold-start memory injection. Writes per-project to .memsearch/
+    // memory/YYYY-MM-DD.md. Cross-machine canonical store is
+    // ~/.local/share/agent-memory/events.jsonl (managed by pms hooks).
+    "opencode-memsearch"
+  ],
+  "agent": {
+    // Disable opencode's built-in `explore` and `general` so the slim pantheon's
+    // @explorer and @orchestrator own those lanes unambiguously.
+    "explore": {
+      "disable": true
+    },
+    "general": {
+      "disable": true
+    }
+  },
+  // MCP servers — Model Context Protocol integrations.
+  // Built-in (no config): websearch (Exa) + context7.
+  // User-added below.
+  "mcp": {
+    // mem0 — cross-session memory store. Persists decisions, deferred items,
+    // operator preferences across opencode sessions. Auto-disables if
+    // MEM0_API_KEY is unset (errors stay quiet — server just fails to start).
+    //
+    // Setup:
+    //   1. Sign up at https://app.mem0.ai (free tier sufficient for solo use)
+    //   2. Get API key from dashboard
+    //   3. Add to shell profile:  export MEM0_API_KEY="..."
+    //   4. Restart opencode
+    //   5. Verify:  opencode mcp list  (mem0 should show "connected")
+    //
+    // Self-hosted alternative: switch command to `["mem0-mcp-local"]` once
+    // the local-only variant lands (currently `mem0-mcp` npm package, file-
+    // backed + Ollama embeddings — see ~/.claude/CLAUDE.md).
+    "mem0": {
+      "type": "local",
+      "command": ["/home/morton/.bun/bin/mem0-mcp"],
+      "environment": {
+        "MEM0_API_KEY": "${MEM0_API_KEY}"
+      },
+      "enabled": true,
+      "timeout": 15000
+    }
+  },
+  "lsp": true
+}
