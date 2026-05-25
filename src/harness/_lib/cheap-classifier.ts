@@ -22,7 +22,7 @@
  * to the orchestrator. NEVER call this in a loop expecting it to "eventually work".
  */
 
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 
 // ── Public types ─────────────────────────────────────────────────────────
 
@@ -196,23 +196,95 @@ export function validateShape(
 }
 
 /**
- * Build a provider client from the opencode plugin context. Used by plugins
- * at runtime; tests inject mocks.
+ * Build a real ProviderClient from the opencode plugin context.
+ *
+ * Implementation mirrors src/tools/smartfetch/secondary-model.ts: spawn an
+ * ephemeral session bound to a small model (haiku), send the prompt, read
+ * back the assistant text, then delete the session. Cheap, deterministic,
+ * no streaming, no tool use.
+ *
+ * Used by the harness cascade plugins (parallel-detector, criteria-validator,
+ * dispatch-judge) for their Tier-1 classifier calls. Tests inject mock
+ * ProviderClients instead.
  */
-export function providerClientFromOpencode(_ctx: Parameters<NonNullable<Plugin>>[0]): ProviderClient {
-  // The opencode plugin context exposes a `client.session.chat()` or similar API.
-  // We implement a thin wrapper here. The exact opencode API surface evolves;
-  // for now we return a no-op client and let install-local.sh wire the real one
-  // via a runtime adapter the plugin ships with.
-  //
-  // This default throws — plugins MUST inject a real client or wire one via the
-  // adapter pattern at registration time.
+export function providerClientFromOpencode(
+  ctx: Parameters<NonNullable<Plugin>>[0],
+): ProviderClient {
+  const client = (ctx as PluginInput).client;
+  const directory =
+    (ctx as PluginInput).directory ?? process.cwd();
+
   return {
-    generate: async () => {
-      throw new Error(
-        "providerClientFromOpencode: default client is not wired. " +
-          "Inject a real ProviderClient via the adapter pattern.",
-      );
+    generate: async ({ model, system, user, maxTokens: _maxTokens, temperature: _temperature }) => {
+      // 1. Create an ephemeral session for the classifier call.
+      const session = (await (client as unknown as {
+        session: {
+          create: (args: unknown) => Promise<unknown>;
+          prompt: (args: unknown) => Promise<unknown>;
+          delete?: (args: unknown) => Promise<unknown>;
+        };
+      }).session.create({
+        responseStyle: 'data',
+        throwOnError: true,
+        query: { directory },
+        body: { title: 'cheap-classifier' },
+      })) as { data?: { id?: string }; id?: string };
+
+      const sessionId = session?.data?.id ?? session?.id;
+      if (!sessionId) {
+        throw new Error('cheap-classifier session.create returned no id');
+      }
+
+      try {
+        // 2. Prompt with system + user message. Disable tools — classifiers
+        //    should never call them. Force JSON-only output via the system
+        //    prompt the caller provides.
+        const result = (await (client as unknown as {
+          session: { prompt: (args: unknown) => Promise<unknown> };
+        }).session.prompt({
+          responseStyle: 'data',
+          throwOnError: true,
+          path: { id: sessionId },
+          query: { directory },
+          body: {
+            model,
+            system,
+            tools: {}, // disable all tools — classifier is text-in/JSON-out
+            parts: [{ type: 'text', text: user }],
+          },
+        })) as
+          | { data?: { parts?: Array<{ type?: string; text?: string }> } }
+          | { parts?: Array<{ type?: string; text?: string }> };
+
+        // 3. Extract assistant text from the response parts.
+        const parts =
+          (result as { data?: { parts?: Array<{ type?: string; text?: string }> } })?.data?.parts ??
+          (result as { parts?: Array<{ type?: string; text?: string }> })?.parts ??
+          [];
+        const text = parts
+          .map((part) => (part?.type === 'text' ? (part.text ?? '') : ''))
+          .join('')
+          .trim();
+
+        return { text };
+      } finally {
+        // 4. Best-effort cleanup. Not all opencode versions expose
+        //    session.delete on the plugin client; ignore if unavailable.
+        try {
+          const maybeDelete = (client as unknown as {
+            session: { delete?: (args: unknown) => Promise<unknown> };
+          }).session.delete;
+          if (typeof maybeDelete === 'function') {
+            await maybeDelete({
+              path: { id: sessionId },
+              query: { directory },
+              throwOnError: false,
+            }).catch(() => {});
+          }
+        } catch {
+          // best-effort
+        }
+      }
     },
   };
 }

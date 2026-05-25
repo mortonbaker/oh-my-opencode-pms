@@ -9,7 +9,11 @@
  * Decision: inject reminder only when both tiers concur with high confidence
  */
 
-import { classify, type ProviderClient } from "./_lib/cheap-classifier";
+import {
+  classify,
+  type ProviderClient,
+  providerClientFromOpencode,
+} from "./_lib/cheap-classifier";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -284,7 +288,7 @@ export async function analyzePrompt(
 import type { PluginInput } from "@opencode-ai/plugin";
 
 export function createParallelDetectorHook(ctx: PluginInput) {
-  const providerClient = ctx.client as unknown as ProviderClient | undefined;
+  const providerClient: ProviderClient = providerClientFromOpencode(ctx);
 
   async function analyzeUserMessage(parts: Array<{ type: string; text?: string }>): Promise<void> {
     try {

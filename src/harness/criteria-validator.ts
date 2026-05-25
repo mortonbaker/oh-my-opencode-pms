@@ -5,7 +5,12 @@
  * falsifiable success criteria + verification commands.
  */
 
-import { classify, type ProviderClient } from "./_lib/cheap-classifier";
+import {
+  classify,
+  type ProviderClient,
+  providerClientFromOpencode,
+} from "./_lib/cheap-classifier";
+import { parseSliceFromPrompt } from "../governance/scope-gate/parser";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 
 // ── Exported regex constants (for testability) ────────────────────────────────
@@ -14,6 +19,20 @@ export const MEASURABLE_VERBS = /\b(reduces?|increases?|decreases?|drops?|below|
 
 export const VAGUE_TERMS = /\b(nice|nicer|better|clean|cleaner|improve|improves|smooth|smoother|polish|polished|modernize|optimize|optimized|simplify)\b/gi;
 
+/**
+ * Per-subagent verification rules (only consulted on the markdown-section
+ * fallback path — when a <slice>{...}</slice> JSON block is present in the
+ * dispatch prompt, the canonical fast-path in validateDispatch() short-
+ * circuits to OK and these rules are skipped).
+ *
+ * Keys are PMS pantheon agent names. Legacy slim names (fixer/designer/
+ * explorer/librarian/oracle) are accepted as aliases via AGENT_ALIAS_MAP
+ * below.
+ *
+ * Agents listed in VALIDATION_EXEMPT_AGENTS (architect/researcher/
+ * synthesizer/triage/observer/judge) bypass criteria validation entirely
+ * and do NOT consult this table.
+ */
 export const SUBAGENT_VERIFICATION_RULES: Record<string, {
   requiredCommands?: RegExp[];
   requiresVisualCheck?: boolean;
@@ -22,39 +41,62 @@ export const SUBAGENT_VERIFICATION_RULES: Record<string, {
   bypassIfBodyContains?: RegExp;
   bypassIfReviewRegex?: RegExp;
 }> = {
-  fixer: {
+  // PMS builder: requires at least one test/build verification command.
+  builder: {
     requiredCommands: [
       /\btsc\b/,
-      /\bcargo\s+build\b/,
-      /\bcargo\s+test\b/,
+      /\bcargo\s+(build|test|check|clippy|sqlx)\b/,
       /\beslint\b/,
+      /\bbiome\s+(check|lint)\b/,
       /\bclippy\b/,
       /\bvitest\b/,
       /\bjest\b/,
       /\bpnpm\s+test\b/,
-      /\bnpm\s+test\b/,
-      /\bbun\s+test\b/,
+      /\bnpm\s+(test|run\s+test|run\s+build)\b/,
+      /\bbun\s+(test|run\s+build|run\s+check)\b/,
+      /\bpytest\b/,
+      /\bgo\s+test\b/,
+      /\bmix\s+test\b/,
+    ],
+  },
+  // PMS qa-reviewer: same verification surface as builder — it runs the
+  // tests/lints/builds to produce evidence.
+  "qa-reviewer": {
+    requiredCommands: [
+      /\btsc\b/,
+      /\bcargo\s+(build|test|check|clippy|sqlx)\b/,
+      /\beslint\b/,
+      /\bbiome\s+(check|lint)\b/,
+      /\bvitest\b/,
+      /\bjest\b/,
+      /\bbun\s+(test|run\s+build|run\s+check)\b/,
+      /\bnpm\s+(test|run\s+test|run\s+build)\b/,
       /\bpytest\b/,
       /\bgo\s+test\b/,
     ],
   },
-  designer: {
-    requiredCommands: [/\btsc\b/, /\beslint\b/],
-    requiresVisualCheck: true,
-  },
-  explorer: {
-    bypassIfAnnotation: "read_only",
-    bypassIfShapeFields: 3,
-  },
-  librarian: {
-    bypassIfAnnotation: "research_only",
-    bypassIfBodyContains: /\b(citations?|URL|source)\b/i,
-  },
-  oracle: {
-    bypassIfAnnotation: "prose_only",
-    bypassIfReviewRegex: /\b(severity|priority|recommendation|finding)\b/i,
-  },
 };
+
+/**
+ * Legacy slim agent names → PMS pantheon names. Used so configs / prompts
+ * authored against the upstream slim conventions still validate correctly
+ * after the rename.
+ */
+const AGENT_ALIAS_MAP: Record<string, string> = {
+  fixer: "builder",
+  explorer: "researcher",
+  librarian: "researcher",
+  oracle: "judge",
+  // designer has no PMS equivalent; bucket it as builder so its old
+  // verification rule (tsc + eslint + visual check) still has a home if
+  // someone dispatches a `designer` subagent_type explicitly.
+  designer: "builder",
+  orchestrator: "project-manager",
+};
+
+function resolveSubagentName(name: string): string {
+  return AGENT_ALIAS_MAP[name] ?? name;
+}
 
 // ── Tier-1 result schema ───────────────────────────────────────────────────────
 
@@ -199,7 +241,8 @@ export function enforceSubagentRules(
   sections: ParsedSections,
   verificationCommands: string[],
 ): { ok: true } | { ok: false; reason: string } {
-  const rule = SUBAGENT_VERIFICATION_RULES[subagentType.toLowerCase()];
+  const rule =
+    SUBAGENT_VERIFICATION_RULES[resolveSubagentName(subagentType.toLowerCase())];
   if (!rule) {
     // Unknown subagent type — pass through
     return { ok: true };
@@ -443,27 +486,81 @@ export interface ValidateDispatchError {
   suggestedFix: string;
 }
 
+/**
+ * Agents that are EXEMPT from criteria-validator enforcement.
+ *
+ * Rationale per agent:
+ *   - architect: produces criteria; dispatching architect itself doesn't need
+ *     pre-validated criteria (it's the source).
+ *   - researcher: read-only discovery; pure-research dispatches don't have
+ *     "verification commands" because there's nothing to verify.
+ *   - synthesizer: compresses research outputs; transformative not executive.
+ *   - triage: JSON-only classifier with all tools disabled.
+ *   - observer: vision analysis; no shell execution.
+ *   - judge: receives criteria as input from its dispatcher; doesn't need
+ *     to embed them in the dispatch prompt.
+ *
+ * Enforcement applies to: builder, qa-reviewer (the agents that EXECUTE
+ * work against criteria — they must receive falsifiable criteria + the
+ * shell commands that verify them).
+ */
+const VALIDATION_EXEMPT_AGENTS = new Set([
+  "architect",
+  "researcher",
+  "synthesizer",
+  "triage",
+  "observer",
+  "judge",
+]);
+
 export async function validateDispatch(
   opts: ValidateDispatchOpts,
 ): Promise<ValidateDispatchResult | ValidateDispatchError> {
   const { prompt, subagentType, providerClient } = opts;
+  const resolvedAgent = resolveSubagentName(subagentType.toLowerCase());
 
-  // Tier 0 — synchronous regex / structural checks
+  // Exempt agents bypass criteria validation entirely.
+  if (VALIDATION_EXEMPT_AGENTS.has(resolvedAgent)) {
+    return { ok: true };
+  }
+
+  // Canonical machine-readable format: <slice>{...}</slice> JSON block
+  // from the architect, with file_changes + acceptance_criteria fields.
+  // This is the format the scope-gate also parses; accepting it here
+  // unifies the two governance layers behind a single dispatch convention.
+  // No markdown-section dance required when the slice JSON is present.
+  const slice = parseSliceFromPrompt(prompt);
+  if (slice && slice.fileChanges.length > 0) {
+    // Slice present with non-empty file_changes — verification_commands
+    // can be empty (read_only annotation pattern) or populated.
+    return { ok: true };
+  }
+
+  // Fallback path: legacy markdown sections (## Success Criteria, etc.)
+  // for backward compatibility with slim-style dispatches.
   const tier0 = tier0Validate(prompt, subagentType);
   if (!tier0.ok) {
-    return { ok: false, tier: "tier0", blockedFor: tier0.blockedFor, suggestedFix: tier0.suggestedFix };
+    return {
+      ok: false,
+      tier: "tier0",
+      blockedFor: tier0.blockedFor,
+      suggestedFix: tier0.suggestedFix,
+    };
   }
 
   // Tier 1 — haiku scorer (requires providerClient)
   if (!providerClient) {
-    // Cannot run Tier 1 without a provider client — allow through but log warning
-    // (In production this should never happen if the plugin is wired correctly)
     return { ok: true };
   }
 
   const tier1 = await tier1Validate(prompt, providerClient);
   if (!tier1.ok) {
-    return { ok: false, tier: "tier1", blockedFor: tier1.blockedFor, suggestedFix: tier1.suggestedFix };
+    return {
+      ok: false,
+      tier: "tier1",
+      blockedFor: tier1.blockedFor,
+      suggestedFix: tier1.suggestedFix,
+    };
   }
 
   return { ok: true };
@@ -472,7 +569,7 @@ export async function validateDispatch(
 // ── Hook factory for PMS integration ─────────────────────────────────────────
 
 export function createCriteriaValidatorHook(ctx: PluginInput) {
-  const providerClient = ctx.client as unknown as ProviderClient | undefined;
+  const providerClient: ProviderClient = providerClientFromOpencode(ctx);
   return {
     "tool.execute.before": async (
       input: { tool: string },

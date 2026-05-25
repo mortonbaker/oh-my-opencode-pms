@@ -7,7 +7,11 @@
  * Tier 1: LLM-as-judge only when Tier 0 passes but output shape is ambiguous.
  */
 
-import { classify, type ProviderClient } from "./_lib/cheap-classifier";
+import {
+  classify,
+  type ProviderClient,
+  providerClientFromOpencode,
+} from "./_lib/cheap-classifier";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -476,7 +480,7 @@ export async function judgeDispatch(opts: JudgeOpts): Promise<JudgeResult> {
 // ── Hook factory for PMS integration ─────────────────────────────────────────
 
 export function createDispatchJudgeHook(ctx: PluginInput) {
-  const providerClient = ctx.client as unknown as ProviderClient | undefined;
+  const providerClient: ProviderClient = providerClientFromOpencode(ctx);
   return {
     "tool.execute.after": async (
       input: { tool: string; args?: Record<string, unknown> },
