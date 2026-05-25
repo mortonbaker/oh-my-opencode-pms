@@ -75,11 +75,28 @@ export class ScopeGate {
     args: Record<string, unknown> | undefined,
     cwd: string,
   ): ScopeCheckResult {
+    const toolLower = tool.toLowerCase();
+
+    // ── UNCONDITIONAL: hard-deny list for Bash fires even without a slice ──
+    // `rm -rf /` and the rest must always be blocked, regardless of whether
+    // a slice is registered for this session.
+    if (toolLower === 'bash') {
+      const command = (args?.command as string | undefined) ?? '';
+      const result = checkBashCommand(command, undefined);
+      if (result.decision === 'deny') {
+        return {
+          decision: 'deny',
+          reason: `BLOCKED: ${result.reason ?? 'destructive bash command'}`,
+        };
+      }
+      // Bash is otherwise allow by default (rely on per-agent permissions
+      // and the hard-deny list — verification_commands is not a whitelist).
+      return { decision: 'pass-through' };
+    }
+
     if (!sessionId) return { decision: 'pass-through' };
     const scope = this.active.get(sessionId);
     if (!scope) return { decision: 'pass-through' };
-
-    const toolLower = tool.toLowerCase();
 
     // Read-only inspection always allowed inside a scoped session.
     if (READ_ONLY_TOOLS.has(toolLower)) return { decision: 'allow', scope };
@@ -96,16 +113,6 @@ export class ScopeGate {
         decision: 'deny',
         scope,
         reason: `SCOPE_VIOLATION: ${tool} target "${targetPath}" not in slice ${scope.id ?? '(unnamed)'} approved file_changes: [${scope.fileChanges.join(', ')}]`,
-      };
-    }
-
-    if (toolLower === 'bash') {
-      const command = (args?.command as string | undefined) ?? '';
-      if (checkBashCommand(command, scope)) return { decision: 'allow', scope };
-      return {
-        decision: 'deny',
-        scope,
-        reason: `SCOPE_VIOLATION: bash command "${command.slice(0, 80)}" not in slice ${scope.id ?? '(unnamed)'} verification_commands: [${scope.verificationCommands.join(', ')}]`,
       };
     }
 

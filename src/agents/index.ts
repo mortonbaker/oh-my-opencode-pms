@@ -43,17 +43,23 @@ const COUNCIL_TOOL_ALLOWED_AGENTS = new Set(['council']);
 /**
  * Per-agent default permissions for bash / edit / write / webfetch.
  *
- * These are the fallback when no architect-approved slice is registered for
- * the subagent's session (i.e. ad-hoc work outside a planned phase). When a
- * slice IS registered, the scope-gate hook (src/governance/scope-gate/) takes
- * over and gates tool calls against file_changes + verification_commands —
- * these defaults don't apply in that case.
+ * Polarity: default ALLOW for Bash everywhere. The hard-deny list in
+ * src/governance/scope-gate/check.ts catches actively-destructive ops
+ * (rm -rf /, sudo, curl|sh, force-push to main, etc.) before opencode runs
+ * them — that's the safety net, NOT a narrow per-role whitelist. Agents
+ * legitimately need sqlite3, psql, cargo sqlx migrate run, docker, kubectl,
+ * curl, etc. depending on the task; pre-listing only "read-only" commands
+ * by role breaks real work.
  *
- * The intent: subagents that are read-only by design (architect, researcher,
- * judge, synthesizer, observer) get bash:allow so they can inspect the
- * codebase without prompts, but edit/write are hard-denied. Builder gets
- * everything allowed because the slice gate is the real safety net. Triage
- * has everything denied because it's a JSON-only classifier.
+ * Edit/Write are denied for non-builder agents (architect/researcher/judge/
+ * synthesizer/observer/qa-reviewer are read-only by job description, not by
+ * tool). Builder gets edit/write:allow; the slice-gate file-scope check
+ * (when a slice is registered) further restricts to architect-approved
+ * file_changes. Without a slice, builder can edit freely — but the
+ * orchestrator should ALWAYS dispatch with a slice in real workflows.
+ *
+ * Triage and councillor are special-case denies: triage is JSON-only with
+ * tools disabled by design; councillor runs inside the council engine.
  */
 const DEFAULT_AGENT_PERMISSIONS: Record<
   string,
@@ -65,30 +71,30 @@ const DEFAULT_AGENT_PERMISSIONS: Record<
   }>
 > = {
   'project-manager': {
-    bash: 'ask',
+    bash: 'allow',
     edit: 'ask',
     write: 'ask',
     webfetch: 'allow',
   },
   architect: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
   researcher: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
-  synthesizer: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'deny' },
+  synthesizer: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
   triage: { bash: 'deny', edit: 'deny', write: 'deny', webfetch: 'deny' },
   builder: {
     bash: 'allow',
     edit: 'allow',
     write: 'allow',
-    webfetch: 'deny',
+    webfetch: 'allow',
   },
   judge: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
   'qa-reviewer': {
     bash: 'allow',
     edit: 'deny',
     write: 'deny',
-    webfetch: 'deny',
+    webfetch: 'allow',
   },
-  observer: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'deny' },
-  council: { bash: 'ask', edit: 'ask', write: 'ask', webfetch: 'allow' },
+  observer: { bash: 'allow', edit: 'deny', write: 'deny', webfetch: 'allow' },
+  council: { bash: 'allow', edit: 'ask', write: 'ask', webfetch: 'allow' },
   councillor: { bash: 'deny', edit: 'deny', write: 'deny', webfetch: 'deny' },
 };
 const SAFE_AGENT_ALIAS_RE = /^[a-z][a-z0-9_-]*$/i;
