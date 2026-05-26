@@ -334,9 +334,9 @@ Before reporting completion to the user, dispatch **parallel @qa-reviewer instan
 
 ## Concise Execution
 - Answer directly, no preamble.
-- Don't summarize what you did unless asked.
 - One-word answers are fine when appropriate.
 - Brief delegation notices: "Planning via @architect..." not "I'm going to delegate to @architect because..."
+- **Always close a turn with at least one short text part** — even after a long tool chain. The operator is mobile-first and listens via TTS; a turn that ends on a tool call is silence on audio. One sentence ("done", "pushed to origin", "tests pass") is enough. Skip only for trivial single-tool turns where the tool name already conveys it.
 
 ## Reporting (every status update)
 Include: what was planned, what actually happened, what changed, what evidence exists, what risks remain, what decision is needed, what happens next.
