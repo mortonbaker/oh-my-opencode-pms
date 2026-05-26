@@ -1,10 +1,62 @@
 # CLAUDE_DEFAULTS — Universal Wizard Knowledge (May 2026)
 
-> Canonical source: `~/agent-stack/_deploy/home/.claude/CLAUDE.md` (git-tracked).
-> Symlinked to `~/.claude/CLAUDE.md` and `~/AGENTS.md` by `_deploy/install.sh`.
-> Edits go in agent-stack, then `git push`, then `git pull` + `install.sh` on
-> other machines. Do NOT edit `~/.claude/CLAUDE.md` directly — you'll edit the
-> symlink target, but lose the convention.
+> **Canonical source:** `~/Code/oh-my-opencode-pms/deploy/.claude/CLAUDE.md`
+> (git-tracked at github.com/mortonbaker/oh-my-opencode-pms). Symlinked to
+> `~/.claude/CLAUDE.md` and `~/AGENTS.md` by `deploy/install.sh` (Linux/macOS)
+> or `deploy/install.ps1` (Windows). Workflow: edit this file *in the repo*,
+> `git push`, then `git pull` on other machines — the symlink reflects it
+> instantly. Do NOT edit `~/.claude/CLAUDE.md` directly; that's the symlink.
+>
+> **This file is host- and OS-agnostic.** It is read verbatim on Windows
+> (DOC01) and Linux (backup, atlas01, learning-machine) alike. Never hardcode
+> a path, home dir, or hostname — detect at runtime per the next section.
+
+---
+
+## MACHINE & OS (detect first — before assuming any path or shell)
+
+- **OS** — check the `Platform` line in the harness environment block:
+  `win32` = Windows, `linux` = Linux, `darwin` = macOS. To confirm at runtime
+  run `uname -s` (POSIX); if it errors you're on Windows / PowerShell (check
+  `$PSVersionTable` / `$env:OS`).
+- **Which machine** — run `hostname`. Live roster is in the Tailnet table
+  below; `tailscale status` is the source of truth.
+- **Home & paths** — never hardcode `C:\Users\morton` or `/home/morton`. Use
+  `~` / `$HOME` (both PowerShell and bash/zsh expand them); expand `~` to an
+  absolute path before handing it to file tools. Windows: PowerShell,
+  backslashes, `$env:VAR`, `if (...) { } else { }`. Linux/macOS: bash/zsh,
+  forward slashes, `$VAR`. Quote paths containing spaces.
+- **Repo root is machine-specific** — Windows (DOC01) keeps repos under
+  `~/repos/` (e.g. `C:\Users\morton\repos\`), except `oh-my-opencode-pms`
+  which lives at `~/Code/`. Linux has no `~/repos/`; repos sit directly under
+  `$HOME` (and `~/Code/`). Detect with `ls ~` or `find ~ -maxdepth 2 -name .git`.
+
+## WIZARD PERSONA & SLASH COMMANDS (vanilla Claude Code sessions)
+
+If the cwd is **not** inside a specific repo, default to the **Tech Wizard**
+persona — but only if its files exist on this machine. Locate agent-stack
+(`ls -d ~/repos/agent-stack ~/agent-stack 2>/dev/null`); if `<agent-stack>/wizard/`
+is present, read, in order: `SYSTEM_PROMPT.md`, `CLAUDE.md`,
+`profile/operator-profile.md`. If the cwd **is** inside a repo, that repo's
+own `CLAUDE.md`/`AGENTS.md` takes precedence over the Wizard default.
+
+Switch personas mid-session via user-level slash commands (`~/.claude/commands/`):
+
+| Command | Persona / Repo |
+|---|---|
+| `/main` | Tech Wizard — `agent-stack/wizard` (default) |
+| `/Sedation` | SedationRx engineering rulebook |
+| `/Coach` | Executive Coach v8.1 — `executive-coach-system` |
+| `/TeamPulse` | Team Pulse engineering rulebook |
+| `/Steward` | Trading Coach (Steward persona) — `Trading_Coach` |
+| `/Atlas` | Atlas — bird's-eye-view agent |
+| `/Philosopher` | Philosopher |
+| `/LabCase` | LabCase engineering |
+| `/LightBox` | Dental Light Box engineering |
+| `/Pi` | Pi-Breakroom-Config (kiosk infra, not a persona) |
+
+Each slash command `cd`s into its repo and loads that repo's `CLAUDE.md` boot
+sequence — the repo, not this file, is the source of truth for the persona.
 
 ---
 
@@ -65,23 +117,26 @@ modules so a rebuild (`bun run build`) is immediately live.
 
 ## CONFIG MAP — every file that matters
 
+All opencode config below is deployed (symlinked) from
+`~/Code/oh-my-opencode-pms/deploy/.config/opencode/` — that repo is the
+source of truth, not agent-stack.
+
 | Path | Purpose | Source-of-truth |
 |---|---|---|
-| `~/.config/opencode/opencode.jsonc` | plugin list, agent disables | agent-stack |
-| `~/.config/opencode/oh-my-opencode-pms.json` | active preset + roster | agent-stack |
-| `~/.config/opencode/oh-my-opencode-pms/project-manager_append.md` | operator orchestrator prefs | agent-stack |
-| `~/.config/opencode/agent/*.md` | per-subagent prompt overrides | agent-stack |
+| `~/.config/opencode/opencode.jsonc` | plugin list, agent disables | `oh-my-opencode-pms/deploy` |
+| `~/.config/opencode/oh-my-opencode-pms.json` | active preset + roster | `oh-my-opencode-pms/deploy` |
+| `~/.config/opencode/oh-my-opencode-pms/project-manager_append.md` | operator orchestrator prefs | `oh-my-opencode-pms/deploy` |
+| `~/.config/opencode/agent/*.md` | per-subagent prompt overrides | `oh-my-opencode-pms/deploy` |
 | `~/.config/opencode/skills/*/SKILL.md` | bundled skills (auto-installed by pms CLI) | `~/Code/oh-my-opencode-pms/src/skills/` |
-| `~/.config/opencode/plugins/paseo-autoregister.mjs` | tailnet dashboard hook | agent-stack |
+| `~/.config/opencode/plugins/paseo-autoregister.mjs` | tailnet dashboard hook | `oh-my-opencode-pms/deploy` |
 | `~/.config/opencode/_attic/` | trash; not synced | (local) |
 | `~/.local/share/opencode/opencode.db` | session state (~1GB, ephemeral) | NOT backed up |
 | `~/.local/share/opencode/log/` | runtime logs | NOT backed up |
 | `~/.local/share/opencode/auth.json` | plugin OAuth tokens | NEVER commit |
-| `~/.claude/CLAUDE.md` → agent-stack | this file | agent-stack |
+| `~/.claude/CLAUDE.md` → repo | this file | `oh-my-opencode-pms/deploy/.claude/` |
 | `~/AGENTS.md` → CLAUDE.md | cross-tool alias (Cursor/Codex/Claude) | symlink |
 | `~/.claude/.credentials.json` | Claude OAuth | NEVER commit |
-| `~/agent-stack/` | canonical bootstrap; clone+install on new machine | github.com/mortonbaker/agent-stack |
-| `~/agent-stack/_generated/inventory.md` | daily-refreshed machine inventory | autogen, NOT hand-edited |
+| `~/Code/oh-my-opencode-pms/` | canonical harness + deploy bootstrap | github.com/mortonbaker/oh-my-opencode-pms |
 | `~/Code/<repo>/AGENTS.md` | per-project conventions | per-repo |
 
 ### Persistence tiers (May 2026 layout)
@@ -95,13 +150,18 @@ modules so a rebuild (`bun run build`) is immediately live.
 ### Migrating to a new machine
 
 ```bash
-git clone https://github.com/mortonbaker/agent-stack.git ~/agent-stack
-cd ~/agent-stack/_deploy && ./install.sh    # symlinks ~/.claude AND ~/.config/opencode
 git clone https://github.com/mortonbaker/oh-my-opencode-pms.git ~/Code/oh-my-opencode-pms
 cd ~/Code/oh-my-opencode-pms && bun install && bun run build && bun link
 bun link oh-my-opencode-pms                  # now opencode loads it
+# Symlink ~/.claude + ~/.config/opencode defaults from the deploy dir:
+#   Linux/macOS:  cd deploy && ./install.sh
+#   Windows:      pwsh -File deploy\install.ps1   (needs Developer Mode or admin for symlinks)
 opencode                                      # roster-print to verify
 ```
+
+On Windows, symlink creation needs **Developer Mode** enabled (Settings →
+Privacy & security → For developers) or an elevated shell. `install.ps1`
+checks for this and tells you if it's missing.
 
 Secrets (`auth.json`, `.credentials.json`) re-authenticated manually — they
 never live in git.
@@ -122,20 +182,22 @@ never live in git.
 
 ## Tailnet Access
 
-**Tailnet name:** `tail00ae77.ts.net`
+**Tailnet name:** `tail00ae77.ts.net` — always confirm the live roster with
+`tailscale status` (machines/IPs change; this table can drift).
 
-All machines share this Tailscale VPN overlay:
+| Machine | Tailscale IP | OS | Role |
+|---|---|---|---|
+| **DOC01** (`doc01-1`) | `100.94.59.41` | Windows | Office dev workstation |
+| **backup** | `100.107.135.99` | Linux | Office box — on the office LAN *and* the tailnet; user `morton`, `HOME=/home/morton` |
+| **atlas01** | `100.127.143.78` | Linux | Headless Debian box. Paseo daemon, atlas-automation runtime |
+| **device** | `100.107.237.71` | Windows | Windows node |
+| **learning-machine** | `100.77.213.11` | Linux | Linux node |
 
-| Machine | Tailscale IP | Role |
-|---|---|---|
-| **atlas01** | `100.127.143.78` | Headless Debian 13 box. Paseo daemon, atlas-automation runtime |
-| **vlad176** | `100.94.59.41` | Windows autonomous rig |
-
-SSH into atlas01 from anywhere:
+SSH between nodes (MagicDNS short names work tailnet-wide; `backup` is also
+reachable on the office LAN):
 ```bash
-ssh morton@atlas01.tail00ae77.ts.net
-# or
-ssh morton@100.127.143.78
+ssh morton@backup                      # or backup.tail00ae77.ts.net / 100.107.135.99
+ssh morton@atlas01.tail00ae77.ts.net   # or 100.127.143.78
 ```
 
 Tailscale CLI:
@@ -320,10 +382,12 @@ steps; naming/formatting bikeshedding unless the user raised it.
 Delegates granular execution to AI agents. Mobile-first, often listening via TTS. Walls of
 bullets read as panic; walls of prose read as evasion.
 
-**Known work locations:**
-- **Office** — has DOC01 (Windows dev), the LAN Pis, dental hardware
-- **Home** — has Studio_PC (primary workstation) and vlad176 (autonomous rig)
-- **Mobile** — phone via TTS, SSH from laptop
+**Machines (see the Tailnet table for the live roster — `tailscale status`):**
+- **Office** — DOC01 (Windows dev workstation), backup (Linux; on the office
+  LAN and the tailnet), the LAN Pis, dental hardware.
+- **Other tailnet nodes** — atlas01, device, learning-machine. Don't assume a
+  physical location for any node; check `tailscale status`.
+- **Mobile** — phone via TTS, SSH from laptop.
 
 **Hard rule:** Never gate work on physical presence at another location. If a plan
 requires the operator to drive somewhere, re-route first.
