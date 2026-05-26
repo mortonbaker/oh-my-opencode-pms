@@ -1,80 +1,90 @@
-# install.ps1 — Windows counterpart of install.sh.
-#
-# Symlinks the deploy/.claude/ defaults into ~/.claude/ and creates the
-# ~/AGENTS.md cross-tool alias, so `git pull` inside the pms repo updates the
-# universal CLAUDE.md on this machine. Idempotent — re-runs are safe.
-#
-# SCOPE: this script intentionally links ONLY ~/.claude/. It does NOT touch
-# ~/.config/opencode/ (Windows opencode config is managed separately to avoid
-# clobbering a working local setup). The Linux install.sh links both.
-#
-# REQUIREMENT: Windows blocks symlink creation for non-admins unless
-# Developer Mode is on (Settings -> Privacy & security -> For developers).
-# Run from an elevated shell if Developer Mode is off.
-#
-# Usage:  pwsh -File deploy\install.ps1     (or)  powershell -File deploy\install.ps1
+<#
+.SYNOPSIS
+  Windows counterpart of install.sh — deploy ~/.claude/ defaults from the
+  oh-my-opencode-pms repo so the universal CLAUDE.md is live on this machine.
 
+.DESCRIPTION
+  Prefers SYMLINKS (edit-once, `git pull` reflects instantly). If symlink
+  creation isn't permitted (Developer Mode off AND not elevated), falls back
+  to COPY mode automatically — in which case you must RE-RUN this script after
+  each `git pull` to refresh ~/.claude/CLAUDE.md.
+
+  SCOPE: deploys ONLY ~/.claude/ (and the ~/AGENTS.md alias). It does NOT
+  touch ~/.config/opencode/ — Windows opencode config is managed separately.
+
+.PARAMETER Copy
+  Force copy mode even when symlinks are available.
+
+.EXAMPLE
+  powershell -File deploy\install.ps1
+  powershell -File deploy\install.ps1 -Copy
+#>
+param([switch]$Copy)
 $ErrorActionPreference = 'Stop'
 
 $DeployDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$HomeDir   = $HOME
-if (-not $HomeDir) { $HomeDir = $env:USERPROFILE }
-if (-not $HomeDir) { Write-Error 'Cannot resolve home directory ($HOME / $env:USERPROFILE both empty).'; exit 1 }
+$HomeDir = if ($HOME) { $HOME } elseif ($env:USERPROFILE) { $env:USERPROFILE } else { throw 'Cannot resolve home directory.' }
 
-# --- Symlink capability check -------------------------------------------------
+# --- Symlink capability ------------------------------------------------------
 $devMode = $false
 try {
-  $k = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -ErrorAction Stop
-  $devMode = ($k.AllowDevelopmentWithoutDevLicense -eq 1)
+  $devMode = ((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -ErrorAction Stop).AllowDevelopmentWithoutDevLicense -eq 1)
 } catch { $devMode = $false }
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
-if (-not ($devMode -or $isAdmin)) {
-  Write-Warning 'Symlinks need Developer Mode (Settings -> Privacy & security -> For developers) or an elevated shell.'
-  Write-Warning 'Neither detected. Enable Developer Mode or re-run as admin, then try again.'
-}
+$canSymlink = (($devMode -or $isAdmin) -and -not $Copy)
+$mode = if ($canSymlink) { 'symlink' } else { 'copy' }
+Write-Host "Mode: $mode  (devMode=$devMode admin=$isAdmin forceCopy=$Copy)"
 
-function Link-Contents {
-  param([string]$Src, [string]$Dest, [string]$Label)
-  if (-not (Test-Path $Src)) { Write-Error "ERROR: $Src does not exist"; return }
-  New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-  Write-Host ''
-  Write-Host "-- $Label --"
-  Write-Host "  src:  $Src"
-  Write-Host "  dest: $Dest"
-  foreach ($f in Get-ChildItem -Force $Src) {
-    $destFile = Join-Path $Dest $f.Name
-    $existing = Get-Item -LiteralPath $destFile -Force -ErrorAction SilentlyContinue
-    if ($existing -and -not $existing.LinkType) {
-      $backup = "$destFile.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-      Write-Host "  backup: $($f.Name) -> $(Split-Path -Leaf $backup)"
-      Move-Item -LiteralPath $destFile -Destination $backup
-    } elseif ($existing -and $existing.LinkType) {
-      Remove-Item -LiteralPath $destFile -Force
+function Deploy-One {
+  param([string]$Src, [string]$Dest)
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $ex = Get-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue
+  if ($ex) {
+    if ($ex.LinkType) { Remove-Item -LiteralPath $Dest -Force }
+    else {
+      Move-Item -LiteralPath $Dest -Destination "$Dest.bak-$stamp"
+      Write-Host "  backup: $(Split-Path -Leaf $Dest) -> $(Split-Path -Leaf $Dest).bak-$stamp"
     }
-    Write-Host "  link:   $($f.Name)"
-    New-Item -ItemType SymbolicLink -Path $destFile -Target $f.FullName | Out-Null
+  }
+  if ($canSymlink) {
+    New-Item -ItemType SymbolicLink -Path $Dest -Target $Src | Out-Null
+    Write-Host "  link:   $Dest"
+  } else {
+    Copy-Item -LiteralPath $Src -Destination $Dest -Force
+    Write-Host "  copy:   $Dest"
   }
 }
 
-# 1. ~/.claude/ (universal wizard context)
-Link-Contents (Join-Path $DeployDir '.claude') (Join-Path $HomeDir '.claude') '~/.claude/'
+# 1. ~/.claude/*  (universal wizard context)
+$srcClaude  = Join-Path $DeployDir '.claude'
+$destClaude = Join-Path $HomeDir '.claude'
+if (-not (Test-Path $srcClaude)) { throw "ERROR: $srcClaude does not exist" }
+New-Item -ItemType Directory -Force -Path $destClaude | Out-Null
+Write-Host ''
+Write-Host '-- ~/.claude/ --'
+foreach ($f in Get-ChildItem -Force $srcClaude) {
+  Deploy-One $f.FullName (Join-Path $destClaude $f.Name)
+}
 
-# 2. ~/AGENTS.md cross-tool alias -> ~/.claude/CLAUDE.md
-$claudeMd = Join-Path $HomeDir '.claude\CLAUDE.md'
+# 2. ~/AGENTS.md cross-tool alias -> CLAUDE.md
+$claudeMd = Join-Path $destClaude 'CLAUDE.md'
 $agentsMd = Join-Path $HomeDir 'AGENTS.md'
 if (Test-Path $claudeMd) {
-  $ex = Get-Item -LiteralPath $agentsMd -Force -ErrorAction SilentlyContinue
-  if ($ex -and -not $ex.LinkType) { Move-Item -LiteralPath $agentsMd -Destination "$agentsMd.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
-  elseif ($ex -and $ex.LinkType) { Remove-Item -LiteralPath $agentsMd -Force }
-  New-Item -ItemType SymbolicLink -Path $agentsMd -Target $claudeMd | Out-Null
   Write-Host ''
   Write-Host '-- ~/AGENTS.md --'
-  Write-Host '  link: -> ~/.claude/CLAUDE.md  (cross-tool alias)'
+  # symlink: point at the local ~/.claude/CLAUDE.md; copy: copy canonical content
+  $agentsSrc = if ($canSymlink) { $claudeMd } else { (Join-Path $srcClaude 'CLAUDE.md') }
+  Deploy-One $agentsSrc $agentsMd
 }
 
 Write-Host ''
 Write-Host '==================================================================='
-Write-Host ' Done. ~/.claude/ is symlinked to the oh-my-opencode-pms deploy dir.'
-Write-Host ' Update:  cd ~/Code/oh-my-opencode-pms; git pull'
-Write-Host ' Capture: cd ~/Code/oh-my-opencode-pms; git add -A; git commit; git push'
+if ($mode -eq 'copy') {
+  Write-Host ' COPY mode: ~/.claude/CLAUDE.md is a COPY of the repo file.'
+  Write-Host ' Re-run this script after `git pull` to refresh:'
+  Write-Host '   cd ~/Code/oh-my-opencode-pms; git pull; powershell -File deploy\install.ps1'
+  Write-Host ' (Enable Developer Mode to upgrade to symlinks automatically.)'
+} else {
+  Write-Host ' SYMLINK mode: `git pull` in the repo updates ~/.claude/ instantly.'
+}
 Write-Host '==================================================================='

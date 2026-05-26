@@ -1,11 +1,14 @@
 # CLAUDE_DEFAULTS — Universal Wizard Knowledge (May 2026)
 
 > **Canonical source:** `~/Code/oh-my-opencode-pms/deploy/.claude/CLAUDE.md`
-> (git-tracked at github.com/mortonbaker/oh-my-opencode-pms). Symlinked to
+> (git-tracked at github.com/mortonbaker/oh-my-opencode-pms). Deployed to
 > `~/.claude/CLAUDE.md` and `~/AGENTS.md` by `deploy/install.sh` (Linux/macOS)
 > or `deploy/install.ps1` (Windows). Workflow: edit this file *in the repo*,
-> `git push`, then `git pull` on other machines — the symlink reflects it
-> instantly. Do NOT edit `~/.claude/CLAUDE.md` directly; that's the symlink.
+> `git push`, then `git pull` on other machines. On symlinked machines the
+> change reflects instantly; on Windows **copy mode** (Developer Mode off)
+> re-run `install.ps1` after the pull to refresh. Do NOT edit a *symlinked*
+> `~/.claude/CLAUDE.md` directly — edit the repo file. (DOC01 currently runs
+> copy mode, so its `~/.claude/CLAUDE.md` is a copy, not a live symlink.)
 >
 > **This file is host- and OS-agnostic.** It is read verbatim on Windows
 > (DOC01) and Linux (backup, atlas01, learning-machine) alike. Never hardcode
@@ -155,13 +158,14 @@ cd ~/Code/oh-my-opencode-pms && bun install && bun run build && bun link
 bun link oh-my-opencode-pms                  # now opencode loads it
 # Symlink ~/.claude + ~/.config/opencode defaults from the deploy dir:
 #   Linux/macOS:  cd deploy && ./install.sh
-#   Windows:      pwsh -File deploy\install.ps1   (needs Developer Mode or admin for symlinks)
+#   Windows:      powershell -File deploy\install.ps1
 opencode                                      # roster-print to verify
 ```
 
-On Windows, symlink creation needs **Developer Mode** enabled (Settings →
-Privacy & security → For developers) or an elevated shell. `install.ps1`
-checks for this and tells you if it's missing.
+`install.ps1` auto-detects symlink capability: with **Developer Mode**
+(Settings → Privacy & security → For developers) or an elevated shell it
+symlinks like Linux; otherwise it falls back to **copy mode** (re-run after
+each `git pull` to refresh). Pass `-Copy` to force copy mode.
 
 Secrets (`auth.json`, `.credentials.json`) re-authenticated manually — they
 never live in git.
