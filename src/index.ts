@@ -300,7 +300,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
     // Initialize phase reminder hook for workflow compliance
     phaseReminderHook = createPhaseReminderHook();
     precompactFlushHook = createPrecompactFlushHook();
-    researchGateHook = createResearchGateHook();
+    researchGateHook = createResearchGateHook(ctx);
     rememberCommand = createRememberCommand({
       getAgentName: (sessionID) => sessionAgentMap.get(sessionID),
     });
@@ -861,6 +861,13 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
 
       // Todo-continuation: auto-continue orchestrator on incomplete todos
       await todoContinuationHook.handleEvent(input);
+
+      // Research-gate V2: auto-correct on session.idle when the most recent
+      // assistant message asked a question without a `## What I researched`
+      // section. One-shot per session; second violation falls through to V1.
+      await researchGateHook.handleEvent(
+        input as { event: { type: string; properties?: Record<string, unknown> } },
+      );
 
       sessionGoalHook.handleEvent(
         input as {

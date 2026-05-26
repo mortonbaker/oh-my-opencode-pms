@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { __testing, createResearchGateHook } from './index';
 
 const {
@@ -6,7 +6,26 @@ const {
   hasResearchSection,
   stripCodeBlocks,
   VIOLATION_REMINDER,
+  AUTO_CORRECTION_PROMPT,
 } = __testing;
+
+// Helper: build a minimal ctx with a mock SDK client for V2 tests
+function makeCtx(messagesData: unknown) {
+  const promptMock = mock(async () => ({}));
+  const messagesMock = mock(async () => ({ data: messagesData }));
+  return {
+    ctx: {
+      client: {
+        session: {
+          messages: messagesMock,
+          prompt: promptMock,
+        },
+      },
+    },
+    promptMock,
+    messagesMock,
+  };
+}
 
 describe('research-gate: detectQuestionToOperator', () => {
   test('detects plain question', () => {
@@ -172,5 +191,208 @@ describe('research-gate: createResearchGateHook integration', () => {
     const output = { messages: [] };
     await hook['experimental.chat.messages.transform']({}, output);
     expect(output.messages.length).toBe(0);
+  });
+});
+
+describe('research-gate V2: handleEvent auto-correction', () => {
+  const violatingMessages = [
+    {
+      info: { role: 'user', sessionID: 's1' },
+      parts: [{ type: 'text', text: 'do the thing' }],
+    },
+    {
+      info: { role: 'assistant', sessionID: 's1' },
+      parts: [{ type: 'text', text: 'I did some. What next?' }],
+    },
+  ];
+
+  const cleanMessages = [
+    {
+      info: { role: 'user', sessionID: 's2' },
+      parts: [{ type: 'text', text: 'plan it' }],
+    },
+    {
+      info: { role: 'assistant', sessionID: 's2' },
+      parts: [
+        {
+          type: 'text',
+          text:
+            '## BLUF\nDoing X.\n\n## What I researched\n- file.ts\n\nProceed?',
+        },
+      ],
+    },
+  ];
+
+  test('fires auto-correction on session.idle when violation present', async () => {
+    const { ctx, promptMock } = makeCtx(violatingMessages);
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+
+    expect(promptMock).toHaveBeenCalledTimes(1);
+    const call = promptMock.mock.calls[0][0] as {
+      path: { id: string };
+      body: { parts: Array<{ text: string }> };
+    };
+    expect(call.path.id).toBe('s1');
+    expect(call.body.parts[0].text).toContain('RESEARCH-GATE AUTO-CORRECTION');
+  });
+
+  test('does NOT fire when last assistant has research section', async () => {
+    const { ctx, promptMock } = makeCtx(cleanMessages);
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's2' } },
+    });
+
+    expect(promptMock).not.toHaveBeenCalled();
+  });
+
+  test('does NOT fire on non-idle events', async () => {
+    const { ctx, promptMock } = makeCtx(violatingMessages);
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: { type: 'message.updated', properties: { sessionID: 's1' } },
+    });
+
+    expect(promptMock).not.toHaveBeenCalled();
+  });
+
+  test('fires on session.status with idle subtype', async () => {
+    const { ctx, promptMock } = makeCtx(violatingMessages);
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: {
+        type: 'session.status',
+        properties: { sessionID: 's1', status: { type: 'idle' } },
+      },
+    });
+
+    expect(promptMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('HARD CAP: only fires once per session (one-shot)', async () => {
+    const { ctx, promptMock } = makeCtx(violatingMessages);
+    const hook = createResearchGateHook(ctx);
+
+    // First idle → fires
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+    expect(promptMock).toHaveBeenCalledTimes(1);
+
+    // Second idle (still violating) → does NOT fire again
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+    expect(promptMock).toHaveBeenCalledTimes(1);
+
+    // Third idle on same session → still capped
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+    expect(promptMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('different sessions each get their own one-shot', async () => {
+    // Both sessions violate
+    const { ctx, promptMock, messagesMock } = makeCtx(violatingMessages);
+    // Make messages mock return data tagged with the requested sessionID
+    messagesMock.mockImplementation(async (args: { path: { id: string } }) => ({
+      data: [
+        {
+          info: { role: 'user', sessionID: args.path.id },
+          parts: [{ type: 'text', text: 'go' }],
+        },
+        {
+          info: { role: 'assistant', sessionID: args.path.id },
+          parts: [{ type: 'text', text: 'Do you want X?' }],
+        },
+      ],
+    }));
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 'sA' } },
+    });
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 'sB' } },
+    });
+    // Each session gets its own auto-correction
+    expect(promptMock).toHaveBeenCalledTimes(2);
+
+    // Repeats on either session are capped
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 'sA' } },
+    });
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 'sB' } },
+    });
+    expect(promptMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('handleEvent is a no-op when ctx is omitted (V1-only mode)', async () => {
+    const hook = createResearchGateHook(); // no ctx
+    // Should not throw
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+    // No assertion possible (no mock) — just verifying no exception
+    expect(true).toBe(true);
+  });
+
+  test('handles SDK errors gracefully (does not throw)', async () => {
+    const promptMock = mock(async () => ({}));
+    const messagesMock = mock(async () => {
+      throw new Error('SDK boom');
+    });
+    const ctx = {
+      client: { session: { messages: messagesMock, prompt: promptMock } },
+    };
+    const hook = createResearchGateHook(ctx);
+
+    // Should swallow the error
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+
+    expect(promptMock).not.toHaveBeenCalled();
+  });
+
+  test('skips when no assistant message in history', async () => {
+    const { ctx, promptMock } = makeCtx([
+      {
+        info: { role: 'user', sessionID: 's1' },
+        parts: [{ type: 'text', text: 'hi' }],
+      },
+    ]);
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: { sessionID: 's1' } },
+    });
+
+    expect(promptMock).not.toHaveBeenCalled();
+  });
+
+  test('skips when sessionID missing from event', async () => {
+    const { ctx, promptMock } = makeCtx(violatingMessages);
+    const hook = createResearchGateHook(ctx);
+
+    await hook.handleEvent({
+      event: { type: 'session.idle', properties: {} },
+    });
+
+    expect(promptMock).not.toHaveBeenCalled();
+  });
+
+  test('detectQuestionToOperator does not flag the auto-correction prompt itself', () => {
+    // Verify the auto-correction prompt won't loop-trigger
+    expect(detectQuestionToOperator(AUTO_CORRECTION_PROMPT)).toBe(false);
   });
 });

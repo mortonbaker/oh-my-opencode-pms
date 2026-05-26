@@ -259,7 +259,7 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 | `phase-reminder` | `src/hooks/phase-reminder/index.ts` | `'experimental.chat.messages.transform'` |
 | `post-file-tool-nudge` | `src/hooks/post-file-tool-nudge/index.ts` | `'tool.execute.after'` |
 | `precompact-flush` | `src/hooks/precompact-flush/index.ts` | `'experimental.session.compacting'` |
-| `research-gate` | `src/hooks/research-gate/index.ts` | `'experimental.chat.messages.transform'` |
+| `research-gate` | `src/hooks/research-gate/index.ts` | `'experimental.chat.messages.transform','session.idle','session.status'` |
 | `session-goal` | `src/hooks/session-goal/index.ts` | `'session.created','session.deleted'` |
 | `task-session-manager` | `src/hooks/task-session-manager/index.ts` | `'experimental.chat.messages.transform','session.created','session.deleted'` |
 | `todo-continuation` | `src/hooks/todo-continuation/index.ts` | `'session.deleted','session.error','session.idle'` |
@@ -312,4 +312,4 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 | `/tts-speak` | `src/commands/tts-speak.ts` | (see source) |
 <!-- /AUTOGEN:commands -->
 
-<!-- AUTOGEN:last-refresh 2026-05-25T22:23:18.170738Z -->
+<!-- AUTOGEN:last-refresh 2026-05-26T23:33:18.247570Z -->
