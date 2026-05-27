@@ -79,6 +79,29 @@ docs-refresh-dry:
 inventory:
     bash scripts/refresh-inventory.sh
 
+# ---- tailnet service registry -------------------------------------------
+
+# Full refresh: scan this host's ports/repos, rebuild REGISTRY.md, git-push.
+services-sync:
+    bash scripts/sync-services.sh
+    @echo ""
+    @echo "→ REGISTRY: ~/.local/share/agent-memory/services/REGISTRY.md"
+
+# Print REGISTRY.md (the human-readable cross-machine view)
+services-show:
+    @cat ~/.local/share/agent-memory/services/REGISTRY.md
+
+# Scan-only (no git push) — useful for rapid iteration on curation
+services-scan:
+    bash scripts/collect-services-local.sh
+    bash scripts/aggregate-services.sh
+
+# Open services.json for curation
+services-edit:
+    ${EDITOR:-vi} ~/.local/share/agent-memory/services/services.json
+    bash scripts/aggregate-services.sh
+    @echo "→ re-aggregated. View: just services-show"
+
 # Weekly review: surface stale memories, drift, doc rot
 review-weekly:
     @echo "Running weekly review (see ./scripts/weekly-review.sh)"
