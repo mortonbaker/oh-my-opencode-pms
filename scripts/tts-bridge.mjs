@@ -26,18 +26,98 @@
  *   tailscale serve --https=8445 off
  */
 
+import { spawn } from 'node:child_process';
 import { watch } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const TMP_DIR = '/tmp';
 const PATTERN = /^opencode-tts-.*\.mp3$/;
 const PORT = Number(process.env.TTS_BRIDGE_PORT ?? 8445);
 const MAX_QUEUE = 20;
+// edge-tts is a Python wrapper that streams audio from Azure in chunks
+// with multi-hundred-ms network pauses. Size polling alone is unreliable
+// because flat windows mid-stream are indistinguishable from "done".
+//
+// Empirical write pattern observed on atlas01:
+//   t=1000ms: size=0, lsof shows holder
+//   t=1100ms: size=18000, lsof=0 (transient close-between-writes gap)
+//   t=1200ms: size=35712, lsof=0 (final, buffer flushed by Python on exit)
+//
+// Robust signal: require `lsof <path>` to return empty AND size to be
+// unchanged for SETTLE_AFTER_CLOSE_MS, with a hard ceiling of MAX_WAIT_MS
+// so a runaway writer can't wedge the bridge.
+const POLL_INTERVAL_MS = 100;
+const SETTLE_AFTER_CLOSE_MS = 600;
+const STABILIZE_MAX_WAIT_MS = 30000;
 
-/** Queue of {path, mtime, idx} — newest at end */
+/**
+ * Per-path lock so concurrent fs.watch events (rename + change + change
+ * + ...) don't all spawn a loadBytes() race where the first racer to
+ * stumble into a transient flat window wins with a truncated buffer.
+ */
+const inFlightLoads = new Set();
+
+/**
+ * Queue of {path, mtime, idx, bytes}.
+ *
+ * Why we cache bytes in memory:
+ *   The opencode-tts plugin (dist/index.js line 276) calls unlinkSync on
+ *   its output mp3 in a `finally` block after attempting local playback.
+ *   On a headless server that playback fails silently and the file is
+ *   deleted within milliseconds of being written. The bridge would then
+ *   serve HTTP 410 Gone when the browser fetched /audio/<idx>.
+ *
+ *   Reading the file into a Buffer the moment fs.watch fires divorces
+ *   the HTTP lifetime from the on-disk lifetime. RAM ceiling is bounded:
+ *   MAX_QUEUE (20) * ~200KB typical mp3 = ~4 MB.
+ *
+ * See: ~/.local/share/agent-memory/decisions/2026-05-25-never-assume-tts-debug.md
+ */
 const queue = [];
 let nextIdx = 1;
+
+/** Return true if any process currently has fullPath open (lsof -t). */
+function hasOpenHolders(fullPath) {
+  return new Promise((resolve) => {
+    const proc = spawn('lsof', ['-t', fullPath], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.on('close', () => resolve(out.trim().length > 0));
+    proc.on('error', () => resolve(false)); // lsof missing → assume closed
+  });
+}
+
+async function loadBytes(fullPath) {
+  let lastSize = -1;
+  let lastSizeChangedAt = Date.now();
+  const deadline = Date.now() + STABILIZE_MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    let size;
+    try {
+      size = (await stat(fullPath)).size;
+    } catch {
+      return Buffer.alloc(0); // unlinked mid-stabilize
+    }
+    if (size !== lastSize) {
+      lastSize = size;
+      lastSizeChangedAt = Date.now();
+      continue;
+    }
+    if (size === 0) continue; // wait for first write
+    // Size hasn't changed since lastSizeChangedAt. Are writers gone?
+    if (Date.now() - lastSizeChangedAt < SETTLE_AFTER_CLOSE_MS) continue;
+    const open = await hasOpenHolders(fullPath);
+    if (open) {
+      // Reset settle timer — writer is still attached even though size paused.
+      lastSizeChangedAt = Date.now();
+      continue;
+    }
+    return await readFile(fullPath);
+  }
+  try { return await readFile(fullPath); } catch { return Buffer.alloc(0); }
+}
 
 async function rescan() {
   try {
@@ -46,12 +126,21 @@ async function rescan() {
     for (const name of candidates) {
       const fullPath = join(TMP_DIR, name);
       if (queue.some((q) => q.path === fullPath)) continue;
+      if (inFlightLoads.has(fullPath)) continue; // another rescan owns it
+      inFlightLoads.add(fullPath);
       try {
-        const st = await stat(fullPath);
-        queue.push({ path: fullPath, mtime: st.mtimeMs, idx: nextIdx++ });
-      } catch {}
+        const bytes = await loadBytes(fullPath);
+        if (bytes.byteLength === 0) continue; // file vanished or stayed empty
+        // Re-stat AFTER stabilize so mtime reflects the final write.
+        const st = await stat(fullPath).catch(() => null);
+        const mtime = st?.mtimeMs ?? Date.now();
+        // Double-check no concurrent rescan beat us to push.
+        if (queue.some((q) => q.path === fullPath)) continue;
+        queue.push({ path: fullPath, mtime, idx: nextIdx++, bytes });
+      } catch {} finally {
+        inFlightLoads.delete(fullPath);
+      }
     }
-    // Sort oldest → newest, trim
     queue.sort((a, b) => a.mtime - b.mtime);
     while (queue.length > MAX_QUEUE) queue.shift();
   } catch (err) {
@@ -220,6 +309,12 @@ window.playIdx = playIdx;
 Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
+  // Max allowed by Bun (255s). Required for the SSE stream at /api/stream —
+  // without this, Bun kills the EventSource at 10s, the browser enters a
+  // reconnect loop, and any new-audio broadcast that lands during the dead
+  // window is silently dropped. The 5s heartbeat above keeps non-SSE proxies
+  // happy too.
+  idleTimeout: 255,
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -256,11 +351,13 @@ Bun.serve({
             ));
           }
           sseClients.add(writeFn);
-          // heartbeat every 15s so proxies don't kill the connection
+          // heartbeat every 5s — must beat Bun.serve idleTimeout (default 10s)
+          // and any upstream proxy idle limits. Belt-and-suspenders with the
+          // idleTimeout: 255 below.
           const hb = setInterval(() => {
             try { controller.enqueue(encoder.encode(': hb\n\n')); }
             catch { clearInterval(hb); sseClients.delete(writeFn); }
-          }, 15000);
+          }, 5000);
           req.signal?.addEventListener('abort', () => {
             clearInterval(hb);
             sseClients.delete(writeFn);
@@ -282,9 +379,16 @@ Bun.serve({
       const idx = Number(m[1]);
       const item = queue.find((q) => q.idx === idx);
       if (!item) return new Response('not found', { status: 404 });
-      const file = Bun.file(item.path);
-      if (!(await file.exists())) return new Response('file gone', { status: 410 });
-      return new Response(file, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'max-age=3600' } });
+      // Serve from in-memory buffer — the on-disk file may have been
+      // unlinked by the opencode-tts plugin's `finally` cleanup (see queue
+      // comment above). The Buffer is the authoritative copy.
+      return new Response(item.bytes, {
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': String(item.bytes.byteLength),
+          'Cache-Control': 'max-age=3600',
+        },
+      });
     }
     return new Response('not found', { status: 404 });
   },

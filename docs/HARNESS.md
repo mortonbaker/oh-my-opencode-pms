@@ -312,4 +312,4 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 | `/tts-speak` | `src/commands/tts-speak.ts` | (see source) |
 <!-- /AUTOGEN:commands -->
 
-<!-- AUTOGEN:last-refresh 2026-05-28T13:51:00.400529Z -->
+<!-- AUTOGEN:last-refresh 2026-05-28T13:51:13.547811Z -->

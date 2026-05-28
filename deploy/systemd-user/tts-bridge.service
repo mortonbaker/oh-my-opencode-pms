@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.bun/bin/bun %h/Code/oh-my-opencode-pms/scripts/tts-bridge.mjs
+ExecStart=/usr/bin/bun %h/Code/oh-my-opencode-pms/scripts/tts-bridge.mjs
 ExecStartPost=/usr/bin/tailscale serve --bg --https=8445 --set-path=/ http://localhost:8445
 ExecStopPost=/usr/bin/tailscale serve --https=8445 off
 Restart=on-failure
