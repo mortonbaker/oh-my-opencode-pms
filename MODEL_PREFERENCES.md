@@ -13,7 +13,7 @@
 | **MiniMax** | `minimax-coding-plan/MiniMax-M2.7-highspeed` | Researcher/parallel tasks |
 | **Mimo** | `xiaomi-token-plan-sgp/mimo-v2.5-pro` | Synthesizer agent primary |
 | **Gemini** | `google/gemini-3.1-pro-preview` | Architect failover |
-| **Judge** | `crofai/deepseek-v4-pro` | ~6000 requests/day quota |
+| **Judge** | `crof/deepseek-v4-pro` | ~6000 requests/day quota |
 
 ---
 

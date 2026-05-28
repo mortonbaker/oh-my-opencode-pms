@@ -109,7 +109,7 @@ export const DEFAULT_MODELS: Record<AgentName, string | undefined> = {
   'project-manager': undefined,
   architect: 'google/gemini-3.1-pro-preview',
   builder: 'zai-coding-plan/glm-5.1',
-  judge: 'crofai/deepseek-v4-pro',
+  judge: 'crof/deepseek-v4-pro',
   'qa-reviewer': 'minimax-coding-plan/MiniMax-M2.7-highspeed',
   researcher: 'minimax-coding-plan/MiniMax-M2.7-highspeed',
   synthesizer: 'xiaomi-token-plan-sgp/mimo-v2.5-pro',

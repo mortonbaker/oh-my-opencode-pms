@@ -43,7 +43,7 @@ User request
                                               ▼
                                 ┌─────────────────────────────┐
                                 │ judge                        │
-                                │ (DeepSeek v4 Pro from crofai)│
+                                │ (DeepSeek v4 Pro from crof)  │
                                 │ pass / revise / escalate     │
                                 └────────────┬────────────────┘
                                               │
@@ -92,12 +92,12 @@ User request
 - **Role**: Executes approved slice file_changes only. No scope expansion.
 
 ### 5. Judge
-- **Model chain**: `crofai/deepseek-v4-pro` → `anthropic/claude-opus-4-7` → `xiaomi-token-plan-sgp/mimo-v2.5-pro`
+- **Model chain**: `crof/deepseek-v4-pro` → `anthropic/claude-opus-4-7` → `xiaomi-token-plan-sgp/mimo-v2.5-pro`
 - **Role**: Pass / revise / escalate verdict against acceptance criteria.
 - **Constraint**: After 3 `revise` iterations on same slice → MUST escalate.
 
 ### 6. Finish-Gate Smoke Test (NEW in v0.1.0)
-- **Model chain**: `minimax-coding-plan/MiniMax-M2.7-highspeed` → `xiaomi-token-plan-sgp/mimo-v2.5-pro` → `crofai/deepseek-v4-pro`
+- **Model chain**: `minimax-coding-plan/MiniMax-M2.7-highspeed` → `xiaomi-token-plan-sgp/mimo-v2.5-pro` → `crof/deepseek-v4-pro`
 - **Role**: PM dispatches **N parallel `qa-reviewer` instances** sharded by test scope (unit / integration / e2e+build+typecheck).
 - **Aggregation**: ALL scopes must pass. ANY failure → route to `judge` for verdict.
 - **Required even on trivial changes** — last drift-detection point before user sees result.

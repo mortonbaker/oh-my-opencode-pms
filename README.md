@@ -25,7 +25,7 @@ The principle is unchanged from upstream: route each part of the job to the agen
 | **`researcher`** | Read-only discovery. Parallel-by-default. Cheap+broad gather. | `minimax-coding-plan/MiniMax-M2.7-highspeed` | Two-stage research pattern — see below. |
 | **`synthesizer`** | Compression specialist. Takes N raw researcher outputs and produces one cited digest. | `xiaomi-token-plan-sgp/mimo-v2.5-pro` | Preserves citations, surfaces contradictions, flags coverage gaps. **NEW in this fork.** |
 | **`builder`** | Implementation specialist. Executes approved file changes only. | `zai-coding-plan/glm-5.1` | No scope expansion, no deps, no migrations without approval. |
-| **`judge`** | Independent reviewer. Returns pass / revise / escalate against acceptance criteria. | `crofai/deepseek-v4-pro` | Cannot self-approve. Must escalate after 3 revise iterations on same slice. |
+| **`judge`** | Independent reviewer. Returns pass / revise / escalate against acceptance criteria. | `crof/deepseek-v4-pro` | Cannot self-approve. Must escalate after 3 revise iterations on same slice. |
 | **`qa-reviewer`** | Quality-evidence keeper. Runs tests/lint/typecheck/build, records verbatim output. | `minimax-coding-plan/MiniMax-M2.7-highspeed` | Failures reported in full — never summarized. |
 | **`triage`** | Tier-1 classifier. JSON-only, no tools. Used internally by harness hooks. | `anthropic/claude-haiku-4-5` | NEVER does work — only classifies. |
 | **`observer`** | Visual analysis (images, PDFs, screenshots). | `xiaomi-token-plan-sgp/mimo-v2.5-pro` | Disabled by default; enable explicitly. |
@@ -188,7 +188,7 @@ Drop your preset at `~/.config/opencode/oh-my-opencode-pms.json`:
       },
       "judge": {
         "model": [
-          "crofai/deepseek-v4-pro",
+          "crof/deepseek-v4-pro",
           "anthropic/claude-opus-4-7",
           "xiaomi-token-plan-sgp/mimo-v2.5-pro"
         ],
@@ -199,7 +199,7 @@ Drop your preset at `~/.config/opencode/oh-my-opencode-pms.json`:
         "model": [
           "minimax-coding-plan/MiniMax-M2.7-highspeed",
           "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-          "crofai/deepseek-v4-pro"
+          "crof/deepseek-v4-pro"
         ],
         "skills": ["falsifiable-criteria"],
         "mcps": []
