@@ -277,8 +277,8 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 |---|---|
 | `architect` | `src/agents/architect.ts` |
 | `builder` | `src/agents/builder.ts` |
-| `council` | `src/agents/council.ts` |
 | `councillor` | `src/agents/councillor.ts` |
+| `council` | `src/agents/council.ts` |
 | `judge` | `src/agents/judge.ts` |
 | `observer` | `src/agents/observer.ts` |
 | `project-manager` | `src/agents/project-manager.ts` |
@@ -312,4 +312,4 @@ Cron jobs auto-register via `deploy/install.sh` (or copy from `scripts/`).
 | `/tts-speak` | `src/commands/tts-speak.ts` | (see source) |
 <!-- /AUTOGEN:commands -->
 
-<!-- AUTOGEN:last-refresh 2026-05-28T13:51:17.825477Z -->
+<!-- AUTOGEN:last-refresh 2026-05-28T23:09:50.427315Z -->

@@ -300,16 +300,28 @@ export function providerClientFromOpencode(
       } finally {
         // 4. Best-effort cleanup. Not all opencode versions expose
         //    session.delete on the plugin client; ignore if unavailable.
+        //
+        //    CRITICAL: invoke delete as a METHOD on `client.session`
+        //    (sessionApi.delete(...)), NOT by extracting it into a bare
+        //    variable first. In @opencode-ai/sdk, session.delete is a
+        //    prototype method whose body dereferences `this._client`; an
+        //    unbound reference makes `this` undefined and throws a synchronous
+        //    TypeError before the promise (and its .catch) exist, so cleanup
+        //    silently never runs and every ephemeral session leaks (~400KB
+        //    resident heap each → unbounded server growth → OOM).
+        //    Regression guard: cheap-classifier.leak.test.ts.
         try {
-          const maybeDelete = (client as unknown as {
+          const sessionApi = (client as unknown as {
             session: { delete?: (args: unknown) => Promise<unknown> };
-          }).session.delete;
-          if (typeof maybeDelete === 'function') {
-            await maybeDelete({
-              path: { id: sessionId },
-              query: { directory },
-              throwOnError: false,
-            }).catch(() => {});
+          }).session;
+          if (typeof sessionApi.delete === 'function') {
+            await sessionApi
+              .delete({
+                path: { id: sessionId },
+                query: { directory },
+                throwOnError: false,
+              })
+              .catch(() => {});
           }
         } catch {
           // best-effort
