@@ -42,6 +42,7 @@ import { createDebriefCommand } from './commands/debrief';
 import { createTtsSpeakCommand } from './commands/tts-speak';
 import { processImageAttachments } from './hooks/image-hook';
 import {
+  cheapClassifierSessionIds,
   createCriteriaValidatorHook,
   createDispatchJudgeHook,
   createHarnessDeployTool,
@@ -1251,6 +1252,23 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         if (message.info.role !== 'user') {
           continue;
         }
+
+        // Recursion guard. cheap-classifier creates ephemeral sessions to run
+        // tier-1 classifier calls; those session.prompt invocations route
+        // through this same transform hook. Without this skip, parallel-
+        // detector fires on the classifier's own user message, calls
+        // classify() again, spawns another cheap-classifier session, and
+        // recurses until the wrapped prompt blows the model context. Receipt:
+        // 1,574 cheap-classifier sessions burst-spawned 2026-05-28 20:36-20:39
+        // from one Team-Pulse `task` dispatch. See
+        // src/harness/_lib/cheap-classifier.recursion.test.ts.
+        if (
+          message.info.sessionID &&
+          cheapClassifierSessionIds.has(message.info.sessionID)
+        ) {
+          continue;
+        }
+
         for (const part of message.parts) {
           if (part.type !== 'text' || typeof part.text !== 'string') {
             continue;

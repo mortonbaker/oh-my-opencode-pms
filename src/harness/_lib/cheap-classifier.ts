@@ -24,6 +24,28 @@
 
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 
+// ── Recursion guard ──────────────────────────────────────────────────────
+
+/**
+ * Session IDs of cheap-classifier sessions currently in flight inside this
+ * process. Populated immediately after `client.session.create` and removed
+ * after `client.session.delete` (or on failure path).
+ *
+ * Other plugin hooks — most importantly `experimental.chat.messages.transform`
+ * in src/index.ts — MUST consult this set and skip work for any message whose
+ * `info.sessionID` is in it. Without that guard, parallel-detector fires on
+ * the cheap-classifier session it just created, calls classify() again, and
+ * recurses unbounded until the wrapped prompt blows the model context.
+ *
+ * Receipt: opencode.db sessions ses_18ea006b5ffebIQ13LexxW5fpo (2026-05-28
+ * 20:36), 1,574 cheap-classifier rows burst-spawned in 4 minutes from a
+ * single Team-Pulse `task` dispatch.
+ *
+ * Process-local. Sessions are only ever accessed through their owning
+ * provider call, so cross-process visibility isn't required.
+ */
+export const cheapClassifierSessionIds = new Set<string>();
+
 // ── Public types ─────────────────────────────────────────────────────────
 
 export interface ClassifyOpts {
@@ -265,6 +287,11 @@ export function providerClientFromOpencode(
         throw new Error('cheap-classifier session.create returned no id');
       }
 
+      // Register the in-flight session so downstream chat.messages.transform
+      // hooks (parallel-detector, etc.) skip it. See cheapClassifierSessionIds
+      // above for the recursion-guard rationale.
+      cheapClassifierSessionIds.add(sessionId);
+
       try {
         // 2. Prompt with system + user message. Disable tools — classifiers
         //    should never call them. Force JSON-only output via the system
@@ -326,6 +353,10 @@ export function providerClientFromOpencode(
         } catch {
           // best-effort
         }
+        // Always release the guard, even if the delete RPC threw. The set is
+        // only consulted by chat.messages.transform; a stale entry would
+        // permanently silence parallel-detector for that session ID.
+        cheapClassifierSessionIds.delete(sessionId);
       }
     },
   };

@@ -15,3 +15,4 @@ export { createParallelDetectorHook } from './parallel-detector';
 export { createCriteriaValidatorHook } from './criteria-validator';
 export { createDispatchJudgeHook } from './dispatch-judge';
 export { createHarnessDeployTool } from './deploy-fanout';
+export { cheapClassifierSessionIds } from './_lib/cheap-classifier';
