@@ -29,8 +29,12 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+  CHEAP_CLASSIFIER_PROMPT_MARKER,
   cheapClassifierSessionIds,
+  classify,
+  looksLikeCheapClassifierPrompt,
   providerClientFromOpencode,
+  type ProviderClient,
 } from './cheap-classifier';
 import { analyzePrompt } from '../parallel-detector';
 
@@ -282,6 +286,79 @@ describe('REGRESSION: parallel-detector cascade is bounded to one session.create
     expect(session.created).toHaveLength(1);
     expect(session.deleted).toHaveLength(1);
     expect(cheapClassifierSessionIds.size).toBe(0);
+  });
+
+  test('CONTENT GUARD: classify() refuses input that already contains the classifier marker', async () => {
+    // The 21:19 cascade — different mechanism from the 20:36 one. The
+    // orchestrator's retry-with-context message contained the previous
+    // classifier rejection (including the marker text). parallel-detector
+    // re-fired on the orchestrator message, called classify(), and wrapped
+    // the marker-bearing text again. This guard breaks that loop at the
+    // source: classify() returns a fast error before spending a
+    // session.create + LLM round-trip.
+    const fakeProvider: ProviderClient = {
+      generate: () => Promise.reject(new Error('should never be called')),
+    };
+    const result = await classify({
+      input: `Some context\n\n${CHEAP_CLASSIFIER_PROMPT_MARKER}`,
+      schema: '{ "x": "boolean" }',
+      providerClient: fakeProvider,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(
+      /cheap-classifier marker/,
+    );
+  });
+
+  test('CONTENT GUARD: looksLikeCheapClassifierPrompt detects the marker substring', () => {
+    expect(looksLikeCheapClassifierPrompt('plain text')).toBe(false);
+    expect(
+      looksLikeCheapClassifierPrompt(`prefix\n${CHEAP_CLASSIFIER_PROMPT_MARKER}\nsuffix`),
+    ).toBe(true);
+    // And the marker is what classify() itself appends — round-trip check:
+    expect(
+      looksLikeCheapClassifierPrompt(
+        `Schema:\n{}\n\nInput:\nfoo\n\n${CHEAP_CLASSIFIER_PROMPT_MARKER}`,
+      ),
+    ).toBe(true);
+  });
+
+  test('RATE LIMIT: rapid classify() bursts get fast-failed after the threshold', async () => {
+    // Use a mock provider so the test runs in microseconds and we can fire
+    // 80 calls inside the 5s window deterministically. The rate-limit guard
+    // lives INSIDE classify() (not provider.generate), so callers — every
+    // real one of which goes through classify — get protected even if a
+    // future bug puts the provider client in a loop.
+    let generateCallCount = 0;
+    const mockProvider: ProviderClient = {
+      generate: () => {
+        generateCallCount++;
+        return Promise.resolve({ text: '{"parallelizable":false}' });
+      },
+    };
+
+    const N = 80;
+    const results = [];
+    for (let i = 0; i < N; i++) {
+      // Vary input so the content guard doesn't catch us — we're proving
+      // the RATE-LIMIT guard, not the content guard.
+      results.push(
+        await classify({
+          input: `batch-call-${i}`,
+          schema: '{ "x": "boolean" }',
+          providerClient: mockProvider,
+        }),
+      );
+    }
+
+    // The limiter must have rejected SOME calls before they reached the
+    // provider. If generateCallCount === N, the limiter didn't fire and
+    // the regression that drove 1,667 sessions in 4 minutes can recur.
+    expect(generateCallCount).toBeLessThan(N);
+    const rateLimited = results.filter(
+      (r) => r.ok === false && /rate limit/i.test(r.error),
+    );
+    expect(rateLimited.length).toBeGreaterThan(0);
   });
 
   test('CONTROL: removing the guard does cascade (proves the test would catch a regression)', async () => {

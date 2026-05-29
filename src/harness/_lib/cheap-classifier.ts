@@ -110,6 +110,55 @@ function parseModelSlug(
   };
 }
 
+// ── Content-based recursion guard ────────────────────────────────────────
+
+/**
+ * Marker substring that ONLY appears in cheap-classifier user prompts.
+ * Built from the literal in `classify()` below — every cheap-classifier
+ * user message ends with this exact sentence. Match is fast and unambiguous.
+ *
+ * If a prompt contains this marker, it's either a previous cheap-classifier
+ * payload being fed back to a classifier (recursion) or an orchestrator
+ * retry whose context includes a rejection from one. Either way, classify()
+ * must not wrap it again — that's the loop we saw on 2026-05-28 21:19.
+ */
+export const CHEAP_CLASSIFIER_PROMPT_MARKER =
+  "Return JSON matching the schema. JSON only.";
+
+/** True if `text` looks like (or contains) a cheap-classifier prompt. */
+export function looksLikeCheapClassifierPrompt(text: string): boolean {
+  return text.includes(CHEAP_CLASSIFIER_PROMPT_MARKER);
+}
+
+// ── Process-wide rate-limit backstop ─────────────────────────────────────
+
+/**
+ * Sliding-window counter of classify() invocations. If we exceed
+ * RATE_LIMIT_MAX in the last RATE_LIMIT_WINDOW_MS, every subsequent call
+ * fast-fails with a transient error until the window drains. This kills
+ * any feedback loop (in this module or any future caller) dead — even if
+ * the content/sessionID guards have a hole we haven't found yet.
+ *
+ * Tuned for legitimate batch use: 50 classify calls in 5 seconds covers
+ * even an aggressive parallel-dispatch turn; anything beyond is a runaway.
+ */
+const RATE_LIMIT_WINDOW_MS = 5_000;
+const RATE_LIMIT_MAX = 50;
+const recentClassifyTimestamps: number[] = [];
+
+function rateLimitTripped(): boolean {
+  const now = Date.now();
+  while (
+    recentClassifyTimestamps.length > 0 &&
+    recentClassifyTimestamps[0]! < now - RATE_LIMIT_WINDOW_MS
+  ) {
+    recentClassifyTimestamps.shift();
+  }
+  if (recentClassifyTimestamps.length >= RATE_LIMIT_MAX) return true;
+  recentClassifyTimestamps.push(now);
+  return false;
+}
+
 // ── Core classifier ──────────────────────────────────────────────────────
 
 /**
@@ -139,8 +188,36 @@ export async function classify<T = unknown>(opts: ClassifyOpts): Promise<Classif
     };
   }
 
+  // Content guard: refuse to classify text that already contains a
+  // cheap-classifier prompt marker. This text is either a previous
+  // classifier payload being fed back to us (recursion) or an orchestrator
+  // retry whose context includes a classifier rejection — wrapping it again
+  // produced the 2026-05-28 21:19 cascade (1,667 sessions / 4 minutes,
+  // wrapped prompts up to 355KB deep). Returning a fast error here breaks
+  // the loop at the source.
+  if (looksLikeCheapClassifierPrompt(input)) {
+    return {
+      ok: false,
+      error: "input contains cheap-classifier marker — refusing to re-wrap",
+      rawText: "",
+      retryable: false,
+    };
+  }
+
+  // Process-wide rate limit. If the upstream caller is in a tight loop —
+  // for any reason, including ones we haven't diagnosed — refuse before
+  // spending a session.create + LLM round-trip on it.
+  if (rateLimitTripped()) {
+    return {
+      ok: false,
+      error: `cheap-classifier rate limit tripped (>${RATE_LIMIT_MAX} calls in ${RATE_LIMIT_WINDOW_MS}ms)`,
+      rawText: "",
+      retryable: true,
+    };
+  }
+
   const system = systemPromptOverride ?? DEFAULT_SYSTEM_PROMPT;
-  const user = `Schema:\n${schema}\n\nInput:\n${input}\n\nReturn JSON matching the schema. JSON only.`;
+  const user = `Schema:\n${schema}\n\nInput:\n${input}\n\n${CHEAP_CLASSIFIER_PROMPT_MARKER}`;
 
   let response: { text: string; usage?: { inputTokens: number; outputTokens: number } };
   try {

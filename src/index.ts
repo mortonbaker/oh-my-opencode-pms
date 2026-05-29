@@ -47,6 +47,7 @@ import {
   createDispatchJudgeHook,
   createHarnessDeployTool,
   createParallelDetectorHook,
+  looksLikeCheapClassifierPrompt,
 } from './harness';
 import { ScopeGate } from './governance/scope-gate';
 import { createInterviewManager } from './interview';
@@ -1253,19 +1254,31 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
           continue;
         }
 
-        // Recursion guard. cheap-classifier creates ephemeral sessions to run
-        // tier-1 classifier calls; those session.prompt invocations route
-        // through this same transform hook. Without this skip, parallel-
-        // detector fires on the classifier's own user message, calls
-        // classify() again, spawns another cheap-classifier session, and
-        // recurses until the wrapped prompt blows the model context. Receipt:
-        // 1,574 cheap-classifier sessions burst-spawned 2026-05-28 20:36-20:39
-        // from one Team-Pulse `task` dispatch. See
-        // src/harness/_lib/cheap-classifier.recursion.test.ts.
+        // Recursion guard, two layers (defense in depth):
+        //   1. sessionID lookup — catches direct re-entry inside a cheap-
+        //      classifier session.prompt invocation.
+        //   2. content lookup — catches the case where the orchestrator
+        //      retries with context that includes a previous classifier
+        //      rejection. The orchestrator's message has the ORCHESTRATOR's
+        //      sessionID (not a classifier's), so #1 doesn't apply — but
+        //      the retry payload contains the cheap-classifier marker text.
+        //      Wrapping that with another `Schema:/Input:` header is what
+        //      drove the 2026-05-28 21:19 cascade (1,667 sessions / 4 min,
+        //      prompts wrapped up to 355KB).
+        // Either match skips ALL downstream transforms for this message.
         if (
           message.info.sessionID &&
           cheapClassifierSessionIds.has(message.info.sessionID)
         ) {
+          continue;
+        }
+        const hasClassifierMarker = message.parts.some(
+          (p) =>
+            p.type === 'text' &&
+            typeof p.text === 'string' &&
+            looksLikeCheapClassifierPrompt(p.text),
+        );
+        if (hasClassifierMarker) {
           continue;
         }
 
