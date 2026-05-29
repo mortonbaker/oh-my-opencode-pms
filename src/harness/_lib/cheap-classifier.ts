@@ -23,6 +23,13 @@
  */
 
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
+import {
+  containsHarnessMark,
+  hashClassifyInput,
+  idempotencyLookup,
+  idempotencyStore,
+  tripLoopGuard,
+} from "./loop-guard";
 
 // ── Recursion guard ──────────────────────────────────────────────────────
 
@@ -61,7 +68,26 @@ export interface ClassifyOpts {
   maxTokens?: number;
   /** Provider client (injected for testing). Default: opencode runtime context. */
   providerClient?: ProviderClient;
+  /**
+   * Layer-1 hop counter. Default 0. Incremented by any caller that
+   * chains a classify() from inside a classify-triggered context. If
+   * a call comes in with depth >= MAX_DISPATCH_DEPTH we trip Layer 1.
+   *
+   * Survives content mutation (lives on the call stack, not in the
+   * prompt text). Backstop for the case where Layer 2 markers get
+   * stripped by an aggressive paraphrase.
+   */
+  dispatchDepth?: number;
+  /**
+   * Optional name of the caller (parallel-detector, criteria-validator,
+   * dispatch-judge, failure-router). Used only for diagnostic logging
+   * when a guard trips.
+   */
+  callerHook?: string;
 }
+
+/** Layer 1: max recursive classify() depth before we refuse. */
+export const MAX_DISPATCH_DEPTH = 3;
 
 export interface ProviderClient {
   generate(args: {
@@ -159,6 +185,11 @@ function rateLimitTripped(): boolean {
   return false;
 }
 
+/** Test-only escape hatch. Do not call from production paths. */
+export function _resetRateLimitForTests(): void {
+  recentClassifyTimestamps.length = 0;
+}
+
 // ── Core classifier ──────────────────────────────────────────────────────
 
 /**
@@ -177,6 +208,8 @@ export async function classify<T = unknown>(opts: ClassifyOpts): Promise<Classif
     model = DEFAULT_MODEL,
     maxTokens = DEFAULT_MAX_TOKENS,
     providerClient,
+    dispatchDepth = 0,
+    callerHook = "unknown",
   } = opts;
 
   if (!providerClient) {
@@ -188,26 +221,85 @@ export async function classify<T = unknown>(opts: ClassifyOpts): Promise<Classif
     };
   }
 
-  // Content guard: refuse to classify text that already contains a
-  // cheap-classifier prompt marker. This text is either a previous
-  // classifier payload being fed back to us (recursion) or an orchestrator
-  // retry whose context includes a classifier rejection — wrapping it again
-  // produced the 2026-05-28 21:19 cascade (1,667 sessions / 4 minutes,
-  // wrapped prompts up to 355KB deep). Returning a fast error here breaks
-  // the loop at the source.
-  if (looksLikeCheapClassifierPrompt(input)) {
+  // ── Layer 1 — TTL / hop count ─────────────────────────────────────────
+  // Lives on the call stack, not in the prompt text. Survives any content
+  // mutation by the LLM. Backstop for the case where harness-mark tags
+  // (Layer 2) get stripped by an aggressive paraphrase.
+  if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
+    tripLoopGuard({
+      layer: 1,
+      hook: callerHook,
+      tripReason: `dispatch depth ${dispatchDepth} >= ${MAX_DISPATCH_DEPTH}`,
+      depth: dispatchDepth,
+      contentPreview: input.slice(0, 200),
+    });
     return {
       ok: false,
-      error: "input contains cheap-classifier marker — refusing to re-wrap",
+      error: `cheap-classifier: TTL exceeded (depth=${dispatchDepth}, max=${MAX_DISPATCH_DEPTH})`,
       rawText: "",
       retryable: false,
     };
   }
 
-  // Process-wide rate limit. If the upstream caller is in a tight loop —
-  // for any reason, including ones we haven't diagnosed — refuse before
-  // spending a session.create + LLM round-trip on it.
+  // ── Layer 2 — provenance-marker detection ─────────────────────────────
+  // If the input contains either a) the legacy cheap-classifier substring
+  // marker (a prior classify wrapped this text), or b) a `<harness-mark>`
+  // tag emitted by ANY harness hook (which means an upstream injection is
+  // being quoted back to us), refuse to wrap it again. Two checks because
+  // older marker-less injections may still be in flight when this ships.
+  const hasLegacyMarker = looksLikeCheapClassifierPrompt(input);
+  const hasHarnessMark = containsHarnessMark(input);
+  if (hasLegacyMarker || hasHarnessMark) {
+    tripLoopGuard({
+      layer: 2,
+      hook: callerHook,
+      tripReason: hasHarnessMark
+        ? "input contains <harness-mark> from a prior injection"
+        : "input contains cheap-classifier marker substring",
+      depth: dispatchDepth,
+      contentPreview: input.slice(0, 200),
+    });
+    return {
+      ok: false,
+      error: "input contains harness provenance marker — refusing to re-wrap",
+      rawText: "",
+      retryable: false,
+    };
+  }
+
+  // ── Layer 3 — content-hash idempotency cache ──────────────────────────
+  // Same (system + input) within IDEMPOTENCY_TTL_MS → return cached result
+  // without spending another LLM round-trip. Catches verbatim-retry loops
+  // AND legitimate duplicate work (two concurrent task dispatches with the
+  // same body).
+  const cacheKey = hashClassifyInput(
+    `${systemPromptOverride ?? "DEFAULT"}\n${schema}\n${input}`,
+  );
+  const cached = idempotencyLookup<ClassifyResult<T>>(cacheKey);
+  if (cached) {
+    tripLoopGuard({
+      layer: 3,
+      hook: callerHook,
+      tripReason: "idempotency cache hit — returning cached classify result",
+      depth: dispatchDepth,
+      contentPreview: input.slice(0, 200),
+    });
+    return cached;
+  }
+
+  // ── Layer 4 — process-wide rate limit ─────────────────────────────────
+  // Last-ditch circuit breaker. Should not normally fire if 1-3 are
+  // working. If it does, that itself is a signal of an undiagnosed loop
+  // — trip log will show the call sites involved.
   if (rateLimitTripped()) {
+    tripLoopGuard({
+      layer: 4,
+      hook: callerHook,
+      tripReason: `>${RATE_LIMIT_MAX} classify() calls in ${RATE_LIMIT_WINDOW_MS}ms`,
+      depth: dispatchDepth,
+      rateWindowCount: recentClassifyTimestamps.length,
+      contentPreview: input.slice(0, 200),
+    });
     return {
       ok: false,
       error: `cheap-classifier rate limit tripped (>${RATE_LIMIT_MAX} calls in ${RATE_LIMIT_WINDOW_MS}ms)`,
@@ -265,6 +357,9 @@ export async function classify<T = unknown>(opts: ClassifyOpts): Promise<Classif
     rawText,
   };
   if (response.usage) result.usage = response.usage;
+  // Layer 3: store the successful result so an immediate retry with the
+  // same input returns instantly without another LLM round-trip.
+  idempotencyStore(cacheKey, result);
   return result;
 }
 

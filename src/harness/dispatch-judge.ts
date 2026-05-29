@@ -405,6 +405,7 @@ ${truncatedOutput}`;
     schema: JUDGE_SCHEMA,
     systemPromptOverride: JUDGE_SYSTEM_PROMPT,
     providerClient,
+    callerHook: "dispatch-judge",
   });
 
   if (!result.ok) {

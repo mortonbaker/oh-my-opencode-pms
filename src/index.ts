@@ -43,11 +43,14 @@ import { createTtsSpeakCommand } from './commands/tts-speak';
 import { processImageAttachments } from './hooks/image-hook';
 import {
   cheapClassifierSessionIds,
+  containsHarnessMark,
   createCriteriaValidatorHook,
   createDispatchJudgeHook,
   createHarnessDeployTool,
   createParallelDetectorHook,
+  extractHarnessMarks,
   looksLikeCheapClassifierPrompt,
+  tripLoopGuard,
 } from './harness';
 import { ScopeGate } from './governance/scope-gate';
 import { createInterviewManager } from './interview';
@@ -1254,31 +1257,68 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
           continue;
         }
 
-        // Recursion guard, two layers (defense in depth):
-        //   1. sessionID lookup — catches direct re-entry inside a cheap-
-        //      classifier session.prompt invocation.
-        //   2. content lookup — catches the case where the orchestrator
-        //      retries with context that includes a previous classifier
-        //      rejection. The orchestrator's message has the ORCHESTRATOR's
-        //      sessionID (not a classifier's), so #1 doesn't apply — but
-        //      the retry payload contains the cheap-classifier marker text.
-        //      Wrapping that with another `Schema:/Input:` header is what
-        //      drove the 2026-05-28 21:19 cascade (1,667 sessions / 4 min,
-        //      prompts wrapped up to 355KB).
-        // Either match skips ALL downstream transforms for this message.
+        // Recursion guard — three layers in this hook (defense in depth).
+        // Every trip emits a single-line [HARNESS-LOOP-GUARD] log.
+        //   1. sessionID lookup. Catches direct re-entry inside a
+        //      cheap-classifier session.prompt invocation.
+        //   2. <harness-mark> tag scan. Catches the case where the
+        //      orchestrator quotes a previous harness injection back into
+        //      its retry — the tag is opaque to the LLM but structurally
+        //      detectable here. This is the primary defense; the harness
+        //      owns the tags both directions, never trusting LLM behavior.
+        //   3. Legacy cheap-classifier substring scan. Belt-and-suspenders
+        //      backstop for pre-tag injections still in flight.
+        // Any match skips ALL downstream transforms for this message.
         if (
           message.info.sessionID &&
           cheapClassifierSessionIds.has(message.info.sessionID)
         ) {
+          tripLoopGuard({
+            layer: 2,
+            hook: 'chat.messages.transform',
+            tripReason:
+              'message belongs to an in-flight cheap-classifier session',
+            orchestratorSession: message.info.sessionID,
+          });
           continue;
         }
-        const hasClassifierMarker = message.parts.some(
+        let foundMark: ReturnType<typeof extractHarnessMarks>[number] | null =
+          null;
+        for (const p of message.parts) {
+          if (p.type === 'text' && typeof p.text === 'string') {
+            if (containsHarnessMark(p.text)) {
+              const marks = extractHarnessMarks(p.text);
+              foundMark = marks[0] ?? null;
+              break;
+            }
+          }
+        }
+        if (foundMark) {
+          const ctx: Parameters<typeof tripLoopGuard>[0] = {
+            layer: 2,
+            hook: 'chat.messages.transform',
+            tripReason: `message contains <harness-mark hook="${foundMark.hook}"> from a prior injection`,
+            contentPreview: foundMark.content.slice(0, 200),
+          };
+          if (message.info.sessionID) ctx.orchestratorSession = message.info.sessionID;
+          if (foundMark.sourceSession) ctx.sourceSession = foundMark.sourceSession;
+          tripLoopGuard(ctx);
+          continue;
+        }
+        const hasLegacyMarker = message.parts.some(
           (p) =>
             p.type === 'text' &&
             typeof p.text === 'string' &&
             looksLikeCheapClassifierPrompt(p.text),
         );
-        if (hasClassifierMarker) {
+        if (hasLegacyMarker) {
+          const ctx: Parameters<typeof tripLoopGuard>[0] = {
+            layer: 2,
+            hook: 'chat.messages.transform',
+            tripReason: 'message contains legacy cheap-classifier substring marker',
+          };
+          if (message.info.sessionID) ctx.orchestratorSession = message.info.sessionID;
+          tripLoopGuard(ctx);
           continue;
         }
 

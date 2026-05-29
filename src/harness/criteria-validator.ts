@@ -10,6 +10,7 @@ import {
   type ProviderClient,
   providerClientFromOpencode,
 } from "./_lib/cheap-classifier";
+import { emitHarnessMark } from "./_lib/loop-guard";
 import { parseSliceFromPrompt } from "../governance/scope-gate/parser";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 
@@ -430,6 +431,7 @@ ${sections.verificationCommands}`;
     schema: TIER_ONE_SCHEMA,
     systemPromptOverride: TIER_ONE_SYSTEM_PROMPT,
     providerClient,
+    callerHook: "criteria-validator",
   });
 
   if (!result.ok) {
@@ -623,11 +625,19 @@ export function createCriteriaValidatorHook(ctx: PluginInput) {
       });
 
       if (!result.ok) {
-        const errorPayload = JSON.stringify({
-          plugin: "criteria-validator",
-          tier: result.tier,
-          blockedFor: result.blockedFor,
-          suggestedFix: result.suggestedFix,
+        // Wrap the error body in a <harness-mark> so that if the
+        // orchestrator quotes this rejection back into a retry, downstream
+        // transform hooks can recognize it as harness-injected and skip
+        // re-processing. The <harness-mark> tag is opaque to the LLM but
+        // structurally detectable by every guard layer.
+        const errorPayload = emitHarnessMark({
+          hook: "criteria-validator",
+          content: JSON.stringify({
+            plugin: "criteria-validator",
+            tier: result.tier,
+            blockedFor: result.blockedFor,
+            suggestedFix: result.suggestedFix,
+          }),
         });
         throw new Error(`DISPATCH_BLOCKED:${errorPayload}`);
       }

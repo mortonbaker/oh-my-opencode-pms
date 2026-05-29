@@ -19,3 +19,9 @@ export {
   cheapClassifierSessionIds,
   looksLikeCheapClassifierPrompt,
 } from './_lib/cheap-classifier';
+export {
+  containsHarnessMark,
+  emitHarnessMark,
+  extractHarnessMarks,
+  tripLoopGuard,
+} from './_lib/loop-guard';

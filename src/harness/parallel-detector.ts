@@ -14,6 +14,7 @@ import {
   type ProviderClient,
   providerClientFromOpencode,
 } from "./_lib/cheap-classifier";
+import { emitHarnessMark } from "./_lib/loop-guard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -242,6 +243,7 @@ export async function analyzePrompt(
     schema: TIER1_SCHEMA,
     systemPromptOverride: TIER1_SYSTEM,
     providerClient,
+    callerHook: "parallel-detector",
   });
 
   if (!result.ok) {
@@ -303,9 +305,16 @@ export function createParallelDetectorHook(ctx: PluginInput) {
       const result = await analyzePrompt(analyzeOpts);
 
       if (result.shouldNudge && result.reminder) {
+        // Wrap the injection in a <harness-mark> so downstream transform
+        // hooks (and the next turn, if the orchestrator quotes this back)
+        // can deterministically identify it as harness-injected content
+        // and skip re-processing. See loop-guard.ts.
         parts.push({
           type: "text",
-          text: `<system-reminder>${result.reminder}</system-reminder>`,
+          text: emitHarnessMark({
+            hook: "parallel-detector",
+            content: `<system-reminder>${result.reminder}</system-reminder>`,
+          }),
         });
       }
     } catch (err) {

@@ -204,6 +204,7 @@ async function callHaikuClassifier(
     schema: `{ category: string, confidence: number, suggested_action: string, reason: string }`,
     systemPromptOverride: HAIKU_SYSTEM_PROMPT,
     providerClient,
+    callerHook: "failure-router",
   });
 }
 

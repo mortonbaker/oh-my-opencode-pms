@@ -27,15 +27,26 @@
  * the guard caps recursion at exactly 1 session.create call).
  */
 
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import {
+  _resetRateLimitForTests,
   CHEAP_CLASSIFIER_PROMPT_MARKER,
   cheapClassifierSessionIds,
   classify,
   looksLikeCheapClassifierPrompt,
+  MAX_DISPATCH_DEPTH,
   providerClientFromOpencode,
   type ProviderClient,
 } from './cheap-classifier';
+import {
+  _resetEvidenceCountersForTests,
+  _resetHarnessEmissionsForTests,
+  _resetIdempotencyCacheForTests,
+  containsHarnessMark,
+  emitHarnessMark,
+  extractHarnessMarks,
+  getEvidenceCounter,
+} from './loop-guard';
 import { analyzePrompt } from '../parallel-detector';
 
 // ── Receipt fixture ──────────────────────────────────────────────────────
@@ -306,7 +317,7 @@ describe('REGRESSION: parallel-detector cascade is bounded to one session.create
     });
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toMatch(
-      /cheap-classifier marker/,
+      /harness provenance marker/,
     );
   });
 
@@ -437,5 +448,164 @@ describe('REGRESSION: parallel-detector cascade is bounded to one session.create
     // regression signal lives in the green test above; this one is a
     // sanity check on the simulator.
     expect(session.created.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ── Layered loop-guard coverage ──────────────────────────────────────────
+// Each layer of the 4-layer defense gets its own test + a check that the
+// loud-log evidence counter increments on trip. State (harness emissions,
+// idempotency cache, evidence counters) is reset before each test so
+// counter assertions are deterministic.
+
+describe('loop-guard layers — full coverage of every defense and its loud log', () => {
+  beforeEach(() => {
+    _resetHarnessEmissionsForTests();
+    _resetIdempotencyCacheForTests();
+    _resetEvidenceCountersForTests();
+    _resetRateLimitForTests();
+  });
+
+  test('LAYER 1 (TTL): classify() refuses when dispatchDepth >= MAX_DISPATCH_DEPTH', async () => {
+    const provider: ProviderClient = {
+      generate: () => Promise.reject(new Error('should never be called')),
+    };
+    const result = await classify({
+      input: 'fresh content with no markers',
+      schema: '{ "x": "boolean" }',
+      providerClient: provider,
+      dispatchDepth: MAX_DISPATCH_DEPTH,
+      callerHook: 'unit-test',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(/TTL exceeded/);
+    expect(getEvidenceCounter(1)).toBe(1);
+  });
+
+  test('LAYER 1: just below the threshold lets the call through', async () => {
+    let generated = 0;
+    const provider: ProviderClient = {
+      generate: () => {
+        generated++;
+        return Promise.resolve({ text: '{"ok":true}' });
+      },
+    };
+    const result = await classify({
+      input: 'fresh content',
+      schema: '{ "ok": "boolean" }',
+      providerClient: provider,
+      dispatchDepth: MAX_DISPATCH_DEPTH - 1,
+      callerHook: 'unit-test',
+    });
+    expect(result.ok).toBe(true);
+    expect(generated).toBe(1);
+    expect(getEvidenceCounter(1)).toBe(0);
+  });
+
+  test('LAYER 2 (provenance marker): classify() refuses input containing <harness-mark>', async () => {
+    const provider: ProviderClient = {
+      generate: () => Promise.reject(new Error('should never be called')),
+    };
+    const inputWithMark =
+      'Some context\n' +
+      emitHarnessMark({
+        hook: 'parallel-detector',
+        sourceSession: 'ses_xyz',
+        content: 'PARALLELIZATION DETECTED',
+      });
+    const result = await classify({
+      input: inputWithMark,
+      schema: '{ "x": "boolean" }',
+      providerClient: provider,
+      callerHook: 'unit-test',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(/harness provenance marker/);
+    expect(getEvidenceCounter(2)).toBe(1);
+  });
+
+  test('LAYER 3 (idempotency cache): identical classify() within TTL returns cached result without re-calling provider', async () => {
+    let generated = 0;
+    const provider: ProviderClient = {
+      generate: () => {
+        generated++;
+        return Promise.resolve({ text: '{"v":1}' });
+      },
+    };
+    const args = {
+      input: 'stable input for cache test',
+      schema: '{ "v": "number" }',
+      providerClient: provider,
+      callerHook: 'unit-test',
+    };
+    const r1 = await classify(args);
+    const r2 = await classify(args);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    // Provider was called once; the second call hit the idempotency cache.
+    expect(generated).toBe(1);
+    expect(getEvidenceCounter(3)).toBe(1);
+  });
+
+  test('HARNESS-MARK round-trip: emitted tag is detectable by content scan and parses back to structured metadata', () => {
+    const text = emitHarnessMark({
+      hook: 'parallel-detector',
+      sourceSession: 'ses_xyz',
+      content: '<system-reminder>PARALLELIZATION DETECTED (unit_count=5)</system-reminder>',
+    });
+    expect(containsHarnessMark(text)).toBe(true);
+    const marks = extractHarnessMarks(`prefix ${text} suffix`);
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.hook).toBe('parallel-detector');
+    expect(marks[0]!.sourceSession).toBe('ses_xyz');
+    expect(marks[0]!.content).toMatch(/PARALLELIZATION DETECTED/);
+  });
+
+  test('HARNESS-MARK round-trip: extraction handles nested + multiple tags in one string', () => {
+    const orchestratorReturnContext =
+      'Earlier I saw ' +
+      emitHarnessMark({
+        hook: 'parallel-detector',
+        sourceSession: 'ses_a',
+        content: 'first reminder',
+      }) +
+      ' and then ' +
+      emitHarnessMark({
+        hook: 'criteria-validator',
+        sourceSession: 'ses_b',
+        content: '{"blocked":true}',
+      });
+    expect(containsHarnessMark(orchestratorReturnContext)).toBe(true);
+    const marks = extractHarnessMarks(orchestratorReturnContext);
+    expect(marks).toHaveLength(2);
+    expect(marks.map((m) => m.hook)).toEqual([
+      'parallel-detector',
+      'criteria-validator',
+    ]);
+    expect(marks.map((m) => m.sourceSession)).toEqual(['ses_a', 'ses_b']);
+  });
+
+  test('DEFENSE IN DEPTH: layers 1 + 2 together — a marker-bearing payload at depth still trips, and only one layer trips per call', async () => {
+    const provider: ProviderClient = {
+      generate: () => Promise.reject(new Error('should never be called')),
+    };
+    // Both Layer 1 (TTL) and Layer 2 (marker) would fire; Layer 1 runs
+    // first in classify(), so it should be the one that trips. This
+    // proves layers short-circuit cleanly and don't double-log.
+    const result = await classify({
+      input:
+        'context ' +
+        emitHarnessMark({
+          hook: 'parallel-detector',
+          sourceSession: 'ses_x',
+          content: 'msg',
+        }),
+      schema: '{ "x": "boolean" }',
+      providerClient: provider,
+      dispatchDepth: MAX_DISPATCH_DEPTH,
+      callerHook: 'unit-test',
+    });
+    expect(result.ok).toBe(false);
+    expect(getEvidenceCounter(1)).toBe(1);
+    expect(getEvidenceCounter(2)).toBe(0);
   });
 });
