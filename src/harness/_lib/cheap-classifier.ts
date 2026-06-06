@@ -221,6 +221,19 @@ export async function classify<T = unknown>(opts: ClassifyOpts): Promise<Classif
     };
   }
 
+  // INSTRUMENTATION (temp 2026-05-28): file-append because opencode
+  // swallows plugin console.* output. Confirms classify() entry and
+  // whether either Layer 2 marker check should have fired.
+  try {
+    const hasMarkerInInput = looksLikeCheapClassifierPrompt(input);
+    const hasHarnessTagInInput = containsHarnessMark(input);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("node:fs").appendFileSync(
+      "/tmp/harness-loop-guard.log",
+      `[CLASSIFY-DEBUG] ${new Date().toISOString()} caller=${callerHook} depth=${dispatchDepth} inputLen=${input.length} hasLegacy=${hasMarkerInInput} hasMark=${hasHarnessTagInInput}\n`,
+    );
+  } catch {}
+
   // ── Layer 1 — TTL / hop count ─────────────────────────────────────────
   // Lives on the call stack, not in the prompt text. Survives any content
   // mutation by the LLM. Backstop for the case where harness-mark tags

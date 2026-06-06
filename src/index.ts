@@ -1252,10 +1252,62 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         }>;
       };
 
+      // INSTRUMENTATION (temp 2026-05-28): file-append because opencode
+      // swallows plugin console.* output. Remove after cascade diagnosed.
+      try {
+        const ts = new Date().toISOString();
+        const lines = [
+          `[GUARD-DEBUG] ${ts} transform fire — messages=${typedOutput.messages.length}`,
+        ];
+        for (const m of typedOutput.messages) {
+          const firstText = m.parts.find(
+            (p) => p.type === 'text' && typeof p.text === 'string',
+          ) as { text?: string } | undefined;
+          const preview = (firstText?.text ?? '')
+            .slice(0, 150)
+            .replace(/\n/g, '\\n');
+          lines.push(
+            `[GUARD-DEBUG] ${ts}   msg role=${m.info.role} sessionID=${m.info.sessionID ?? 'UNDEFINED'} parts=${m.parts.length} preview="${preview}"`,
+          );
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('node:fs').appendFileSync(
+          '/tmp/harness-loop-guard.log',
+          lines.join('\n') + '\n',
+        );
+      } catch {}
+
       for (const message of typedOutput.messages) {
         if (message.info.role !== 'user') {
           continue;
         }
+
+        // INSTRUMENTATION: file-append because opencode swallows plugin
+        // console.* output.
+        try {
+          const dbgSessionID = message.info.sessionID;
+          const dbgInSet = dbgSessionID
+            ? cheapClassifierSessionIds.has(dbgSessionID)
+            : false;
+          const dbgHasMark = message.parts.some(
+            (p) =>
+              p.type === 'text' &&
+              typeof p.text === 'string' &&
+              containsHarnessMark(p.text),
+          );
+          const dbgHasLegacy = message.parts.some(
+            (p) =>
+              p.type === 'text' &&
+              typeof p.text === 'string' &&
+              looksLikeCheapClassifierPrompt(p.text),
+          );
+          const dbgSetSize = cheapClassifierSessionIds.size;
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('node:fs').appendFileSync(
+            '/tmp/harness-loop-guard.log',
+            `[GUARD-DEBUG] ${new Date().toISOString()}   guards: sessionID=${dbgSessionID ?? 'UNDEFINED'} inSet=${dbgInSet} setSize=${dbgSetSize} hasMark=${dbgHasMark} hasLegacy=${dbgHasLegacy}\n`,
+          );
+        } catch {}
 
         // Recursion guard — three layers in this hook (defense in depth).
         // Every trip emits a single-line [HARNESS-LOOP-GUARD] log.
