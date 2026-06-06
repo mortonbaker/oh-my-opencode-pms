@@ -25,6 +25,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 
 // ── Harness-mark tag (Pattern 2/3 — provenance marker using session IDs) ──
 
@@ -272,10 +273,18 @@ export function tripLoopGuard(ctx: TripContext): void {
       .slice(0, 200);
     fields.push(`content-preview="${escapeLogValue(trimmed)}"`);
   }
-  // stderr — captured by journalctl --user -u opencode-web.service AND
-  // by opencode's own log capture. Single console.warn keeps the line
-  // intact (console.error in some environments adds stack frames).
-  console.warn(`[HARNESS-LOOP-GUARD] ${fields.join(" ")}`);
+  // 2026-05-28 empirical finding: opencode's plugin runtime swallows
+  // console.warn/console.error output — it reaches NEITHER journalctl
+  // NOR opencode's own log file. We bypass that by appending directly to
+  // a file every harness writer can grep. console.warn is kept as a
+  // best-effort secondary (in case future opencode versions surface it).
+  const line = `[HARNESS-LOOP-GUARD] ${new Date().toISOString()} ${fields.join(" ")}\n`;
+  try {
+    appendFileSync("/tmp/harness-loop-guard.log", line);
+  } catch {
+    // Swallow file errors — never let logging break the guard path.
+  }
+  console.warn(line.trimEnd());
 }
 
 function escapeLogValue(s: string): string {
