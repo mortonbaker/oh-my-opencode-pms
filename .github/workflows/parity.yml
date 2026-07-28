@@ -1,0 +1,50 @@
+name: deploy-parity
+
+# Guards the Linux<->Windows deploy parity rule (deploy/PARITY.md): the two
+# installers must stay in lockstep, and Windows automation must exist for the
+# scheduled jobs / service that Linux gets via cron + systemd.
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - 'scripts/**'
+  push:
+    paths:
+      - 'deploy/**'
+      - 'scripts/**'
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.ps1 deploys the same three trees as install.sh
+        run: |
+          set -e
+          ps=deploy/install.ps1
+          for needle in '.config\\opencode' 'agent-memory' '.claude'; do
+            grep -qF "$needle" "$ps" || { echo "::error file=$ps::install.ps1 missing parity for '$needle' (see deploy/PARITY.md)"; exit 1; }
+          done
+          echo "install.ps1 covers .claude + .config/opencode + agent-memory"
+      - name: install.ps1 preserves machine-local opencode.json
+        run: grep -qF 'opencode.json' deploy/install.ps1 || { echo "::error::install.ps1 must protect machine-local opencode.json"; exit 1; }
+      - name: Windows automation exists for scheduled jobs / service
+        run: |
+          set -e
+          for f in \
+            deploy/windows/setup-prereqs.ps1 \
+            deploy/windows/fix-pms-cache.ps1 \
+            deploy/windows/opencode-webui-launch.ps1 \
+            deploy/windows/install-webui-service.ps1 \
+            deploy/windows/register-tasks.ps1 \
+            deploy/windows/sync-memory.ps1; do
+            test -f "$f" || { echo "::error::missing $f (Windows parity, see deploy/PARITY.md)"; exit 1; }
+          done
+          echo "deploy/windows/ automation present"
+      - name: shared config stays OS-portable (no hardcoded POSIX home paths)
+        run: |
+          if grep -nE '"/home/|/Users/' deploy/.config/opencode/opencode.jsonc; then
+            echo "::error file=deploy/.config/opencode/opencode.jsonc::hardcoded POSIX path in shared config — use a bare binary name or {env:VAR} (see deploy/PARITY.md)"; exit 1
+          fi
+          echo "shared opencode.jsonc is OS-portable"
