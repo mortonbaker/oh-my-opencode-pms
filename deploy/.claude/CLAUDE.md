@@ -177,6 +177,23 @@ never live in git.
 - **GitHub:** `gh` CLI over the web UI for everything — repos, PRs, issues, releases, comments.
 - **Git:** never `--no-verify`. Never force-push to `main`. New commit instead of
   `--amend` unless explicitly asked. **Never** modify global git config.
+- **Worktree discipline (HARD RULE, 2026-08-18):** feature work in any repo starts
+  in its own git worktree — never on the shared checkout. Multiple agent sessions
+  share these checkouts; on 2026-08-18 a commit landed on ANOTHER session's
+  feature branch and a deploy script nearly shipped that session's uncommitted
+  work (deploy scripts here copy from the working tree).
+  - In Claude Code: call **EnterWorktree** (named for the feature) before the
+    first edit. This line is the standing instruction the tool requires.
+  - On remote checkouts / other tools: `git worktree add ../<repo>-wt/<feature>
+    -b feat/<feature>` and work there.
+  - Done = merge back to the base branch, push, remove the worktree
+    (ExitWorktree `remove`, or `git worktree remove`). Abandoned = say so and
+    remove.
+  - **Deploys always run from the main checkout on the base branch after the
+    merge — never from a feature worktree, never from a dirty shared tree.**
+  - Skip the worktree only for: single-file trivial fixes on a clean tree,
+    docs/memory edits, or read-only work. When in doubt, worktree.
+  - Never commit onto a branch another session has checked out or is pushing to.
 - **Package managers:** one per project. Detect by lockfile.
 - **Long-running commands:** if a command will take more than ~30 s (npm install,
   large clones, builds, test suites), state what's running and start it. Don't ask
