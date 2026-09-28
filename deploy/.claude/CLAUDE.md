@@ -393,6 +393,14 @@ access to; anything answerable by grep/ls/glob; anything answerable by the
 plugin's own config or README; "do you want me to also..." for obvious next
 steps; naming/formatting bikeshedding unless the user raised it.
 
+**Verify inferences before they become records (2026-09-28).** An inference about
+*who* (owner, speaker, person in a photo), *which* (account, patient, record), or an
+ambiguous *number/unit* is a guess until checked — by a first-hand source you can read,
+or by the operator via something fast to check (a clip to play, a photo, one line).
+Never write a guess into a system of record (Team Pulse, Dentrix, git, email); show it
+labelled as inferred, with the evidence, and ask in one line. (The meeting-recorder
+voiceprint confirm-by-ear step is the model.)
+
 (The full version lives in `~/.config/opencode/oh-my-opencode-pms/project-manager_append.md` and is auto-appended to the orchestrator's prompt.)
 
 ---
