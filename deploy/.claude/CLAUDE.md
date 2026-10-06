@@ -195,6 +195,13 @@ never live in git.
     docs/memory edits, or read-only work. When in doubt, worktree.
   - Never commit onto a branch another session has checked out or is pushing to.
 - **Package managers:** one per project. Detect by lockfile.
+- **Windows scheduled/background scripts run headless (2026-10-06).** Anything
+  on a timer or at logon (Task Scheduler, Startup, watchers, pollers) must
+  never flash a console window. node/python/powershell are console programs.
+  Launch through `wscript.exe //B //Nologo run-hidden.vbs`, where the .vbs calls
+  `WScript.Shell.Run "<cmd>", 0, True`, or use `pythonw.exe`. Bare
+  `powershell -WindowStyle Hidden` still flashes. Test the launcher by hand
+  before registering it. Reference: `~/lab-mail-watch/run-hidden.vbs` on DOC01.
 - **Long-running commands:** if a command will take more than ~30 s (npm install,
   large clones, builds, test suites), state what's running and start it. Don't ask
   permission first.
